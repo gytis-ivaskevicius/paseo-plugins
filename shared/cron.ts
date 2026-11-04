@@ -48,8 +48,12 @@ function parseNumber(token: string, spec: FieldSpec, field: CalendarField): numb
 
 /**
  * One comma-separated cron field to the sorted set of values it names, or
- * null for an unrestricted `*`. Accepts `N`, `A-B`, `*\/S`, `A-B/S`, `A/S`
- * (from A to the field's max, as Vixie cron reads it) and three-letter names.
+ * null for an unrestricted `*`. Accepts `N`, `A-B`, `*\/S`, `A-B/S` and
+ * three-letter names.
+ *
+ * `A/S` (A to the field's max, as Vixie cron reads it) is deliberately
+ * refused: the scheduler library refuses it too, and the form must never
+ * preview an expression the daemon will then reject.
  */
 function parseField(text: string, field: CalendarField): number[] | null | string {
   const spec = FIELD_SPECS[field];
@@ -83,7 +87,10 @@ function parseField(text: string, field: CalendarField): number[] | null | strin
       if (typeof parsedLow === "string") return parsedLow;
       low = parsedLow;
       if (highText === undefined) {
-        high = stepText === undefined ? low : spec.max;
+        if (stepText !== undefined) {
+          return `"${part}" needs an explicit range; write ${lowText ?? low}-${spec.max}/${stepText}`;
+        }
+        high = low;
       } else {
         const parsedHigh = parseNumber(highText, spec, field);
         if (typeof parsedHigh === "string") return parsedHigh;

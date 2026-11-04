@@ -27,10 +27,6 @@ import {
   type StoredJob,
 } from "./store";
 
-function isMissing(error: unknown): boolean {
-  return (error as { code?: string }).code === "ENOENT";
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -233,13 +229,8 @@ export async function setJobEnabledHandler(input: { id: string; enabled: boolean
 export async function readJobLogHandler(input: { id: string }): Promise<{ text: string; truncated: boolean; path: string }> {
   await findJob(input.id);
   const path = logPath(input.id);
-  try {
-    const tail = await readTail(path, LOG_TAIL_BYTES);
-    return { ...tail, path };
-  } catch (error) {
-    if (isMissing(error)) return { text: "", truncated: false, path };
-    throw error;
-  }
+  // `readTail` already treats a missing file as an empty tail.
+  return { ...(await readTail(path, LOG_TAIL_BYTES)), path };
 }
 
 /** Empties the job's log; the run history and acknowledgements are untouched. */

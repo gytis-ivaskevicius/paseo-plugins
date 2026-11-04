@@ -249,11 +249,6 @@ export async function readRuns(id: string): Promise<RunRecord[]> {
   return records.slice(-RECENT_RUNS).reverse();
 }
 
-/** The latest recorded run, or null when the job has never run. */
-export async function readLastRun(id: string): Promise<RunRecord | null> {
-  return (await readRuns(id))[0] ?? null;
-}
-
 /**
  * Appends one line of history, then compacts the file once it has grown past
  * a quarter of a megabyte. Compaction keeps the last two hundred runs, which

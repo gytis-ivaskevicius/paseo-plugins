@@ -17,7 +17,6 @@ describe("parseCron", () => {
       weekday: [1, 2, 3, 4, 5],
     });
     expect(fields("*/15 * * * *").minute).toEqual([0, 15, 30, 45]);
-    expect(fields("5/20 * * * *").minute).toEqual([5, 25, 45]);
     expect(fields("0 9-17/4 * * *").hour).toEqual([9, 13, 17]);
     expect(fields("0 0 1,15 * *").day).toEqual([1, 15]);
     expect(fields("0 0 * jan,jul *").month).toEqual([1, 7]);
@@ -40,6 +39,8 @@ describe("parseCron", () => {
     expect(parseCron("5-2 * * * *")).toMatchObject({ ok: false });
     expect(parseCron("*,5 * * * *")).toMatchObject({ ok: false });
     expect(parseCron("a * * * *")).toMatchObject({ ok: false });
+    // A/S is not part of the dialect the scheduler accepts; a range is required.
+    expect(parseCron("5/20 * * * *")).toMatchObject({ ok: false });
     // The old launchd entry cap is gone: a dense expression is just a schedule.
     expect(parseCron("*/1 */1 */1 * *")).toMatchObject({ ok: true });
   });
