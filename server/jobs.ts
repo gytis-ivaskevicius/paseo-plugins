@@ -10,7 +10,7 @@ import { Cron } from "croner";
 
 import { describeCron, describeInterval, parseCron } from "../shared/cron";
 import type { Job, JobSpec, RunRecord, ScheduleSpec } from "../shared/jobs";
-import { arm, daemonTimezone, disarm, isRunning, nextRunAt, pidOf, problemFor, runNow, stopAll } from "./scheduler";
+import { arm, daemonTimezone, disarm, isRunning, nextRunAt, pidOf, problemFor, startRun, stopAll } from "./scheduler";
 import {
   LOG_TAIL_BYTES,
   ensureDirs,
@@ -210,9 +210,11 @@ export async function deleteJobHandler(input: { id: string }): Promise<Record<st
   return {};
 }
 
-export async function runJobHandler(input: { id: string }): Promise<Record<string, never>> {
-  await runNow(await findJob(input.id));
-  return {};
+/** Starts a run and answers with the job as it is now — `running: true`. */
+export async function runJobHandler(input: { id: string }): Promise<Job> {
+  const job = await findJob(input.id);
+  await startRun(job);
+  return buildJob(job);
 }
 
 export async function setJobEnabledHandler(input: { id: string; enabled: boolean }): Promise<Job> {

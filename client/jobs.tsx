@@ -41,6 +41,8 @@ let cachedDraft: { key: string; draft: Draft } | null = null;
 
 /** How often the list re-reads the daemon while the surface is on screen. */
 const REFRESH_MS = 15_000;
+/** And while a job is running, when the result is seconds away. */
+const RUNNING_REFRESH_MS = 2_000;
 
 /** Whether the list in hand has job `id`; null names no job, so it is trivially listed. */
 function isListed(id: string | null): boolean {
@@ -444,7 +446,7 @@ function JobDetail({
           disabled={working || job.running}
           onPress={() =>
             void act(async function runNow() {
-              await run({ id: job.id });
+              onChanged(await run({ id: job.id }));
               onNotice({ tone: "info", text: `Started "${job.name}".` });
             }, "Could not start the job")
           }
@@ -852,13 +854,16 @@ export function CronJobs(props: PluginScreenProps) {
     [list],
   );
 
+  // A run in progress is worth watching: it finishes and its history line
+  // lands within seconds, so the list polls faster until nothing is running.
+  const anyRunning = (jobs ?? []).some((job) => job.running);
   useEffect(() => {
     void refresh();
     // While a form is open the list still refreshes underneath, which is
     // harmless: the form owns its own draft.
-    const timer = setInterval(() => void refresh(true), REFRESH_MS);
+    const timer = setInterval(() => void refresh(true), anyRunning ? RUNNING_REFRESH_MS : REFRESH_MS);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, anyRunning]);
 
   const replaceJob = useCallback((job: Job) => {
     setJobs((current) => {

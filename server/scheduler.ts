@@ -35,6 +35,11 @@ interface Running {
   startedAt: Date;
 }
 
+/** A spawned run: the object exists now, `completion` settles when it is over. */
+interface Run {
+  completion: Promise<void>;
+}
+
 const armed = new Map<string, Cron>();
 const running = new Map<string, Running>();
 const problems = new Map<string, string>();
@@ -147,44 +152,62 @@ export function problemFor(id: string): string | null {
 // Running
 
 /**
- * Runs a job now, outside its schedule. Refuses while the same job is already
- * going, so a manual press cannot stack two copies of a slow command.
+ * Runs a job now, outside its schedule, and returns as soon as the process is
+ * spawned — the caller gets to show "Running" instead of a button that looks
+ * stuck for the length of the command. Refuses while the same job is already
+ * going, so a manual press cannot stack copies.
  */
-export async function runNow(job: StoredJob): Promise<void> {
+export async function startRun(job: StoredJob): Promise<void> {
   if (isRunning(job.id)) throw new Error("That job is already running");
-  await fire({ id: job.id, command: job.command, cwd: job.cwd }, true);
+  inflight.add(job.id);
+  let run: Run;
+  try {
+    run = await spawnRun({ id: job.id, command: job.command, cwd: job.cwd }, true);
+  } catch (error) {
+    inflight.delete(job.id);
+    throw error;
+  }
+  void run.completion.catch(() => undefined).finally(() => inflight.delete(job.id));
+}
+
+/**
+ * A scheduled trigger. Overlapping triggers are skipped with a line in the log
+ * rather than queued — a job that takes longer than its interval is a job
+ * whose schedule is wrong.
+ */
+function fire(job: JobSnapshot): void {
+  // Claimed synchronously: two triggers in the same tick must not both pass
+  // the idle check while the first is still opening its log.
+  if (inflight.has(job.id)) {
+    void appendSkip(job.id);
+    return;
+  }
+  inflight.add(job.id);
+  void spawnRun(job, false)
+    .then((run) => run.completion)
+    .catch((error: unknown) => {
+      console.error(`[paseo-cron] could not start ${job.id}: ${errorMessage(error)}`);
+    })
+    .finally(() => inflight.delete(job.id));
 }
 
 /**
  * One run: rotate the log if it is fat, write a start marker, spawn the shell,
- * stream its output into the log, then record a history line. Overlapping
- * triggers are skipped with a line in the log rather than queued — a job that
- * takes longer than its interval is a job whose schedule is wrong.
+ * stream its output into the log, then record a history line. `completion`
+ * settles when the run is over and its history line is on disk.
+ *
+ * The result is an object because an async function returning a bare promise
+ * would have it flattened by `await` — and the point is to hand back a handle
+ * to the run while it is still going.
+ *
+ * Throws only when the log cannot be opened, which is worth telling a user who
+ * pressed Run now; a command that fails to spawn is a failed run instead.
  */
-async function fire(job: JobSnapshot, manual = false): Promise<void> {
-  if (inflight.has(job.id)) {
-    await appendSkip(job.id);
-    return;
-  }
-  inflight.add(job.id);
-  try {
-    await run(job, manual);
-  } finally {
-    inflight.delete(job.id);
-  }
-}
-
-async function run(job: JobSnapshot, manual: boolean): Promise<void> {
+async function spawnRun(job: JobSnapshot, manual: boolean): Promise<Run> {
   const startedAt = new Date();
-  let stream: ReturnType<typeof createWriteStream>;
-  try {
-    await ensureDirs();
-    await rotateLogIfLarge(job.id);
-    stream = createWriteStream(logPath(job.id), { flags: "a" });
-  } catch (error) {
-    console.error(`[paseo-cron] could not open the log for ${job.id}: ${errorMessage(error)}`);
-    return;
-  }
+  await ensureDirs();
+  await rotateLogIfLarge(job.id);
+  const stream = createWriteStream(logPath(job.id), { flags: "a" });
   // A log that cannot be written must not take the daemon down with an
   // unhandled stream error; the run still happens and is still recorded.
   stream.on("error", (error: Error) => {
@@ -207,17 +230,14 @@ async function run(job: JobSnapshot, manual: boolean): Promise<void> {
   } catch (error) {
     write(`=== ${new Date().toISOString()} could not start: ${errorMessage(error)}\n`);
     stream.end();
-    await record(job.id, startedAt, 1);
-    return;
+    return { completion: record(job.id, startedAt, 1) };
   }
 
   if (child.pid !== undefined) running.set(job.id, { pid: child.pid, startedAt });
   child.stdout?.on("data", (chunk: Buffer) => write(chunk.toString("utf8")));
   child.stderr?.on("data", (chunk: Buffer) => write(chunk.toString("utf8")));
 
-  // The caller waits for the history line, not just the process: a "Run now"
-  // whose run is not yet in the list is a press that looks ignored.
-  await new Promise<void>((resolve) => {
+  const completion = new Promise<void>((resolve) => {
     let settled = false;
     const finish = async function finish(exitCode: number, note: string | null): Promise<void> {
       if (settled) return;
@@ -238,6 +258,7 @@ async function run(job: JobSnapshot, manual: boolean): Promise<void> {
       else void finish(1, `killed by ${signal ?? "a signal"}`);
     });
   });
+  return { completion };
 }
 
 async function record(id: string, startedAt: Date, exitCode: number): Promise<void> {

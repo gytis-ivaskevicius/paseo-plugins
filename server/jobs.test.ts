@@ -40,6 +40,19 @@ afterEach(() => {
   delete process.env.PASEO_HOME;
 });
 
+/**
+ * "Run now" answers as soon as the process is spawned, so tests that assert on
+ * a finished run wait for it here rather than for the RPC.
+ */
+async function settle(id: string, runs = 1): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const job = (await listJobsHandler()).jobs.find((entry) => entry.id === id);
+    if (job !== undefined && !job.running && job.recentRuns.length >= runs) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`the run of ${id} did not finish`);
+}
+
 const cronSpec = (name: string, command: string, expression = "0 3 * * *") => ({
   name,
   command,
@@ -72,9 +85,17 @@ describe("jobs", () => {
     await expect(createJobHandler(cronSpec("Bad", "true", "0 9 * *"))).rejects.toThrow(/five fields/);
   });
 
+  it("starts a run immediately and reports it running", async () => {
+    const job = await createJobHandler(cronSpec("Slow", "sleep 0.3"));
+    const started = await runJobHandler({ id: job.id });
+    expect(started.running).toBe(true);
+    await settle(job.id);
+  });
+
   it("runs a command now and records the run", async () => {
     const job = await createJobHandler(cronSpec("Hello", "printf 'hello from the job\\n'"));
     await runJobHandler({ id: job.id });
+    await settle(job.id);
 
     const [after] = (await listJobsHandler()).jobs;
     expect(after?.recentRuns[0]?.exitCode).toBe(0);
@@ -90,6 +111,7 @@ describe("jobs", () => {
   it("records a failure, reports it, and forgets it once acknowledged", async () => {
     const job = await createJobHandler(cronSpec("Fails", "exit 7"));
     await runJobHandler({ id: job.id });
+    await settle(job.id);
 
     expect((await readJobHealthHandler()).failing).toEqual([{ id: job.id, name: "Fails" }]);
     await acknowledgeJobHandler({ id: job.id });
@@ -98,10 +120,12 @@ describe("jobs", () => {
     // A later success drops the acknowledgement instead of hiding a failure.
     await updateJobHandler({ id: job.id, spec: cronSpec("Fails", "true") });
     await runJobHandler({ id: job.id });
+    await settle(job.id, 2);
     expect((await readJobHealthHandler()).failing).toEqual([]);
 
     await updateJobHandler({ id: job.id, spec: cronSpec("Fails", "exit 2") });
     await runJobHandler({ id: job.id });
+    await settle(job.id, 3);
     expect((await readJobHealthHandler()).failing).toEqual([{ id: job.id, name: "Fails" }]);
   });
 
@@ -132,6 +156,7 @@ describe("jobs", () => {
   it("deletes the job and its files", async () => {
     const job = await createJobHandler(cronSpec("Temporary", "true"));
     await runJobHandler({ id: job.id });
+    await settle(job.id);
     await deleteJobHandler({ id: job.id });
     expect((await listJobsHandler()).jobs).toEqual([]);
     await expect(readJobLogHandler({ id: job.id })).rejects.toThrow(/No job/);

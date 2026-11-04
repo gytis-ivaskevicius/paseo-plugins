@@ -103,7 +103,8 @@ export const deleteJob = defineRpc({
 export const runJob = defineRpc({
   name: "jobs.run",
   input: z.object({ id: z.string() }),
-  output: z.object({}),
+  /** The job as it is after the spawn, so the surface can show it running. */
+  output: JobSchema,
 });
 
 export const setJobEnabled = defineRpc({
