@@ -54,6 +54,11 @@ are `new Cron("* * * * * *", { interval: seconds })` — croner's way of saying
 "at most one trigger every N seconds", which is the only way to name an
 arbitrary period.
 
+A job may name an IANA zone; `arm` hands it to croner, and `null` means the
+daemon's own zone. `assertZone` rejects a zone this host cannot resolve, because
+an unknown zone would arm and then fire at the wrong time rather than not at
+all.
+
 A job that cannot be armed (`problem !== null`) still lives in the store, so the
 user can see and fix it; it simply has no timer.
 

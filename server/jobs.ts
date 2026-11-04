@@ -70,7 +70,18 @@ function normaliseSpec(input: JobSpec): JobSpec {
     command: input.command.trim(),
     cwd: input.cwd === null || input.cwd.trim() === "" ? null : input.cwd.trim(),
     schedule: input.schedule,
+    timezone: input.timezone === null || input.timezone === "" ? null : input.timezone.trim(),
   };
+}
+
+/** A zone the host does not know would arm and then never fire as intended. */
+function assertZone(zone: string | null): void {
+  if (zone === null) return;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+  } catch {
+    throw new Error(`"${zone}" is not a time zone this host knows`);
+  }
 }
 
 function slugify(name: string): string {
@@ -112,6 +123,7 @@ async function buildJob(job: StoredJob): Promise<Job> {
     command: job.command,
     cwd: job.cwd,
     schedule: scheduleOf(job.schedule),
+    timezone: job.timezone ?? null,
     enabled: job.enabled,
     running: isRunning(job.id),
     pid: pidOf(job.id),
@@ -153,6 +165,7 @@ export async function listJobsHandler(): Promise<{ jobs: Job[]; dataDir: string;
 export async function createJobHandler(input: JobSpec): Promise<Job> {
   const spec = normaliseSpec(input);
   assertSchedulable(spec.schedule);
+  assertZone(spec.timezone);
   const created = await mutate(async function add(jobs) {
     const now = new Date().toISOString();
     const job: StoredJob = {
@@ -161,6 +174,7 @@ export async function createJobHandler(input: JobSpec): Promise<Job> {
       command: spec.command,
       cwd: spec.cwd,
       schedule: spec.schedule,
+      timezone: spec.timezone,
       enabled: true,
       createdAt: now,
       updatedAt: now,
@@ -174,6 +188,7 @@ export async function createJobHandler(input: JobSpec): Promise<Job> {
 export async function updateJobHandler(input: { id: string; spec: JobSpec }): Promise<Job> {
   const spec = normaliseSpec(input.spec);
   assertSchedulable(spec.schedule);
+  assertZone(spec.timezone);
   const updated = await mutate(async function edit(jobs) {
     const existing = jobs.find((entry) => entry.id === input.id);
     if (existing === undefined) throw new Error(`No job with id "${input.id}"`);
@@ -183,6 +198,7 @@ export async function updateJobHandler(input: { id: string; spec: JobSpec }): Pr
       command: spec.command,
       cwd: spec.cwd,
       schedule: spec.schedule,
+      timezone: spec.timezone,
       updatedAt: new Date().toISOString(),
     };
     return { next: jobs.map((entry) => (entry.id === input.id ? job : entry)), result: job };

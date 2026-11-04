@@ -59,6 +59,7 @@ const cronSpec = (name: string, command: string, expression = "0 3 * * *") => ({
   command,
   cwd: null,
   schedule: { type: "cron" as const, expression },
+  timezone: null,
 });
 
 describe("jobs", () => {
@@ -141,12 +142,34 @@ describe("jobs", () => {
     expect(on.nextRun).not.toBeNull();
   });
 
+  it("reads the expression in the job's own time zone", async () => {
+    const job = await createJobHandler({
+      ...cronSpec("Zoned", "true", "0 2 * * *"),
+      timezone: "America/New_York",
+    });
+    expect(job.timezone).toBe("America/New_York");
+    const local = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(job.nextRun ?? ""));
+    expect(local).toBe("02:00");
+  });
+
+  it("refuses a time zone the host does not know", async () => {
+    await expect(
+      createJobHandler({ ...cronSpec("Bad zone", "true"), timezone: "Mars/Olympus" }),
+    ).rejects.toThrow(/not a time zone/);
+  });
+
   it("takes an interval schedule", async () => {
     const job = await createJobHandler({
       name: "Poll",
       command: "true",
       cwd: null,
       schedule: { type: "interval", seconds: 90 },
+      timezone: null,
     });
     expect(job.schedule).toEqual({ type: "interval", seconds: 90, description: "Every 90 seconds" });
     // The first run is one interval out, not immediately on enable.

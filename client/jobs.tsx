@@ -497,7 +497,7 @@ function JobDetail({
               ? "Next run: not scheduled"
               : `Next run: ${absoluteTime(job.nextRun)}`
             : "Next run: none while the job is disabled"}
-          {timezone === "" ? "" : ` · ${timezone}`}
+          {` · ${job.timezone ?? timezone}`}
         </Text>
       </Section>
 
@@ -597,6 +597,7 @@ interface Draft {
   name: string;
   command: string;
   cwd: string;
+  timezone: string;
   mode: "cron" | "interval";
   expression: string;
   every: string;
@@ -604,9 +605,24 @@ interface Draft {
 }
 
 function draftFrom(job: Job | null): Draft {
-  const base: Draft = { name: "", command: "", cwd: "", mode: "cron", expression: "0 9 * * 1-5", every: "30", unit: "minutes" };
+  const base: Draft = {
+    name: "",
+    command: "",
+    cwd: "",
+    timezone: "",
+    mode: "cron",
+    expression: "0 9 * * 1-5",
+    every: "30",
+    unit: "minutes",
+  };
   if (job === null) return base;
-  const draft: Draft = { ...base, name: job.name, command: job.command, cwd: job.cwd ?? "" };
+  const draft: Draft = {
+    ...base,
+    name: job.name,
+    command: job.command,
+    cwd: job.cwd ?? "",
+    timezone: job.timezone ?? "",
+  };
   if (job.schedule.type === "cron") draft.expression = job.schedule.expression;
   if (job.schedule.type === "interval") {
     draft.mode = "interval";
@@ -637,7 +653,8 @@ function specFrom(draft: Draft): { ok: true; spec: JobSpec } | { ok: false; erro
     if (seconds < 1) return { ok: false, error: "The interval must be at least a second" };
     schedule = { type: "interval", seconds };
   }
-  return { ok: true, spec: { name, command, cwd: cwd === "" ? null : cwd, schedule } };
+  const timezone = draft.timezone.trim();
+  return { ok: true, spec: { name, command, cwd: cwd === "" ? null : cwd, schedule, timezone: timezone === "" ? null : timezone } };
 }
 
 function JobForm({
@@ -765,6 +782,20 @@ function JobForm({
           value={draft.cwd}
           onChangeText={(cwd) => patch({ cwd })}
           placeholder="~/repositories/project"
+          placeholderTextColor={muted}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
+      <View>
+        <Text style={styles.label}>Time zone — optional IANA name, e.g. America/New_York; defaults to the daemon's</Text>
+        <TextInput
+          accessibilityLabel="Time zone"
+          style={styles.input}
+          value={draft.timezone}
+          onChangeText={(timezone) => patch({ timezone })}
+          placeholder="daemon time zone"
           placeholderTextColor={muted}
           autoCapitalize="none"
           autoCorrect={false}

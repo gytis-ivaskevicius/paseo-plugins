@@ -55,7 +55,9 @@ cron defines them (`0 20 1 * mon` fires on the 1st **or** on Mondays).
 **Fixed interval**: every N seconds, minutes or hours, counted from when the job
 was enabled.
 
-Schedules are read in the daemon's own time zone, which the detail pane shows.
+Schedules are read in the daemon's own time zone unless the job names one: an
+IANA zone such as `America/New_York` on the job keeps `0 2 * * *` at 2am local
+across daylight saving. The detail pane shows which zone a job is using.
 
 ## When it fires, and when it does not
 

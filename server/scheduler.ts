@@ -95,17 +95,19 @@ export function arm(job: StoredJob): void {
   problems.delete(job.id);
   if (!job.enabled) return;
   const snapshot: JobSnapshot = { id: job.id, command: job.command, cwd: job.cwd };
+  // croner reads the expression in its own local zone unless told otherwise.
+  const zone = job.timezone === null ? {} : { timezone: job.timezone };
   try {
     const cron =
       job.schedule.type === "cron"
-        ? new Cron(job.schedule.expression, () => void fire(snapshot))
+        ? new Cron(job.schedule.expression, zone, () => void fire(snapshot))
         : // A one-second pattern with a minimum gap is how croner expresses
           // "every N seconds"; no expression can name an arbitrary interval.
           // `startAt` pushes the first run one interval out, so enabling a
           // six-hour job does not run it on the spot.
           new Cron(
             "* * * * * *",
-            { interval: job.schedule.seconds, startAt: new Date(Date.now() + job.schedule.seconds * 1000) },
+            { ...zone, interval: job.schedule.seconds, startAt: new Date(Date.now() + job.schedule.seconds * 1000) },
             () => void fire(snapshot),
           );
     armed.set(job.id, cron);

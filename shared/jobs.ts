@@ -22,6 +22,8 @@ export const JobSpecSchema = z.object({
   /** Absolute path, or null for the daemon user's home directory. */
   cwd: z.string().trim().nullable(),
   schedule: ScheduleSpecSchema,
+  /** IANA zone the schedule is read in; null means the daemon's own zone. */
+  timezone: z.string().trim().min(1).nullable().default(null),
 });
 
 export type JobSpec = z.infer<typeof JobSpecSchema>;
@@ -51,6 +53,8 @@ export const JobSchema = z.object({
   command: z.string(),
   cwd: z.string().nullable(),
   schedule: ScheduleSchema,
+  /** The zone this job's expression is read in, or null for the daemon's. */
+  timezone: z.string().nullable(),
   /**
    * Whether the daemon has this job armed. A job with an expression the
    * scheduler refuses stays in the store, disabled, with `problem` set.

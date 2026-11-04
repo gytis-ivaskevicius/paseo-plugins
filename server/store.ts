@@ -23,6 +23,8 @@ export interface StoredJob {
   command: string;
   cwd: string | null;
   schedule: ScheduleSpec;
+  /** IANA zone for the schedule; null means the daemon's zone. */
+  timezone: string | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -81,6 +83,7 @@ function isStoredJob(value: unknown): value is StoredJob {
     typeof job.name === "string" &&
     typeof job.command === "string" &&
     (job.cwd === null || typeof job.cwd === "string") &&
+    (job.timezone === null || job.timezone === undefined || typeof job.timezone === "string") &&
     typeof job.enabled === "boolean" &&
     typeof job.createdAt === "string" &&
     typeof job.updatedAt === "string" &&
