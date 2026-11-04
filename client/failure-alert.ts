@@ -2,7 +2,7 @@
  * The failing jobs the sidebar row counts, and the poll that finds them.
  *
  * A job that fails at 3am is worth knowing about without opening anything, so
- * the sidebar row itself carries the news: a red count beside "Scheduled jobs"
+ * the sidebar row itself carries the news: a red count beside "Cron jobs"
  * and a struck-through calendar instead of a clock. The row is a live
  * component (`client/sidebar-item.tsx`); this module is the store it reads,
  * written by a poll that runs whether or not the screen or the sidebar is

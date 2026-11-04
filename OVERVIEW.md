@@ -1,4 +1,4 @@
-# Scheduled jobs
+# Cron jobs
 
 A scheduler for shell commands that lives inside Paseo. Create a job with a
 name, a command and a schedule, and the daemon runs it, keeps its output and

@@ -12,9 +12,9 @@ export default function contribute(client: PluginClientContext) {
   const stopAlert = startFailureAlert(client);
   client.addCommandCenterItem({
     id: "open-jobs",
-    title: "Open scheduled jobs",
+    title: "Open cron jobs",
     icon: "CalendarClock",
-    keywords: ["cron", "schedule", "jobs", "timer"],
+    keywords: ["cron", "schedule", "jobs", "timer", "command", "shell"],
     context: "global",
     onSelect({ openScreen }) {
       openScreen(lastJobsScreenInput());

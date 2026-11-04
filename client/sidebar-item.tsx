@@ -12,7 +12,7 @@ const IDLE_ICON = "CalendarClock";
 const FAILING_ICON = "CalendarX2";
 
 /**
- * The Scheduled jobs row in the sidebar header. Paseo draws it from the host
+ * The Cron jobs row in the sidebar header. Paseo draws it from the host
  * the app is showing, and the failing count comes from that host's own poll,
  * so the badge is always the viewed host's jobs.
  *

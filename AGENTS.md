@@ -1,6 +1,6 @@
 # AGENTS.md
 
-A Paseo plugin that adds a **Scheduled jobs** screen and sidebar row: shell
+A Paseo plugin that adds a **Cron jobs** screen and sidebar row: shell
 commands on a cron expression or a fixed interval, run by the Paseo daemon
 itself. There is no launchd, systemd or crontab involvement anywhere.
 

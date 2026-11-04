@@ -7,7 +7,7 @@ import type { PluginOpenScreenInput, PluginScreenParams } from "@getpaseo/plugin
  * of the same id, so renaming either loses both.
  */
 export const JOBS_SCREEN_ID = "jobs";
-export const JOBS_TITLE = "Scheduled jobs";
+export const JOBS_TITLE = "Cron jobs";
 
 /**
  * The screen param naming the job to open on. It is read when the screen

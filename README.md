@@ -6,7 +6,7 @@ holds the timers inside the plugin's own server process and spawns the commands
 itself, so the same plugin works on macOS, Linux and Windows and keeps the job
 list, logs and history in one portable place.
 
-It adds a **Scheduled jobs** screen: create a job with a name, a command, a
+It adds a **Cron jobs** screen: create a job with a name, a command, a
 working directory and either a cron expression or a fixed interval. The screen
 shows the next run, the last twenty runs with exit codes, and the log.
 
