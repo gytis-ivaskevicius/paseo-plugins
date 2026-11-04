@@ -1,0 +1,7 @@
+{
+  "id": "paseo-cron",
+  "description": "Schedule shell commands from Paseo, on any OS, with no launchd or systemd",
+  "requirements": {
+    "paseo": ">=0.11.0"
+  }
+}
