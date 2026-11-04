@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, readdir, stat } from "node:fs/promises";
+import { access, mkdir, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { RpcInput } from "@getpaseo/plugin";
@@ -22,6 +22,18 @@ function entryPath(name: string): string {
   return path.join(storeRoot(), `${name}.gpg`);
 }
 
+async function assertStore(): Promise<string> {
+  const root = storeRoot();
+  try {
+    await access(root, constants.R_OK);
+  } catch {
+    throw new Error(
+      `STORE_NOT_FOUND: Password store not found at ${root}. Set PASSWORD_STORE_DIR or create the store.`,
+    );
+  }
+  return root;
+}
+
 async function executable(candidate: string): Promise<boolean> {
   try {
     await access(candidate, constants.X_OK);
@@ -37,7 +49,7 @@ async function resolvePass(): Promise<string> {
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
     if (dir) candidates.push(path.join(dir, "pass"));
   }
-  candidates.push("/home/celty/.nix-profile/bin/pass");
+  candidates.push(path.join(homedir(), ".nix-profile", "bin", "pass"));
   for (const candidate of candidates) {
     if (await executable(candidate)) return candidate;
   }
@@ -55,6 +67,25 @@ async function exists(name: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+const writeQueues = new Map<string, Promise<void>>();
+
+async function withWriteLock<T>(name: string, run: () => Promise<T>): Promise<T> {
+  const previous = writeQueues.get(name) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => gate);
+  writeQueues.set(name, queued);
+  await previous;
+  try {
+    return await run();
+  } finally {
+    release();
+    if (writeQueues.get(name) === queued) writeQueues.delete(name);
   }
 }
 
@@ -93,36 +124,48 @@ interface Entry {
   bytes: number;
 }
 
-async function walk(root: string, dir: string): Promise<Entry[]> {
+async function walk(root: string, dir: string, isRoot = false): Promise<Entry[]> {
+  let dirents;
+  try {
+    dirents = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (!isRoot && (error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
   const found: Entry[] = [];
-  for (const dirent of await readdir(dir, { withFileTypes: true })) {
+  for (const dirent of dirents) {
     if (dirent.name.startsWith(".")) continue;
     const full = path.join(dir, dirent.name);
     if (dirent.isDirectory()) {
       found.push(...(await walk(root, full)));
     } else if (dirent.isFile() && dirent.name.endsWith(".gpg")) {
-      const info = await stat(full);
-      found.push({
-        name: path.relative(root, full).slice(0, -4).split(path.sep).join("/"),
-        updatedAt: info.mtimeMs,
-        bytes: info.size,
-      });
+      try {
+        const info = await stat(full);
+        found.push({
+          name: path.relative(root, full).slice(0, -4).split(path.sep).join("/"),
+          updatedAt: info.mtimeMs,
+          bytes: info.size,
+        });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
     }
   }
   return found;
 }
 
 export async function listEntries({ query }: RpcInput<typeof secretsList>) {
-  const root = storeRoot();
+  const root = await assertStore();
+  await resolvePass();
+  let entries: Entry[];
   try {
-    await access(root, constants.R_OK);
-  } catch {
+    entries = await walk(root, root, true);
+  } catch (error) {
     throw new Error(
-      `STORE_NOT_FOUND: Password store not found at ${root}. Set PASSWORD_STORE_DIR or create the store.`,
+      `STORE_READ_FAILED: Could not read the password store at ${root}: ${(error as Error).message}`,
     );
   }
-  await resolvePass();
-  const entries = await walk(root, root);
   const wanted = query?.toLowerCase() ?? "";
   return {
     entries: entries
@@ -156,32 +199,38 @@ export async function setEntry({
 }: RpcInput<typeof secretsSet>) {
   const relaxed = entryNameError(name);
   if (relaxed) throw new Error(`INVALID_NAME: ${relaxed}`);
-  const strict = nameError(name);
-  if (strict && !(overwrite && (await exists(name)))) {
-    throw new Error(`INVALID_NAME: ${strict}`);
-  }
   const problem = valueError(value);
   if (problem) {
     throw new Error(`${value === "" ? "EMPTY_VALUE" : "INVALID_VALUE"}: ${problem}`);
   }
-  if (!overwrite && (await exists(name))) {
-    throw new Error(`EXISTS: ${name} already exists.`);
-  }
-  const input = notes ? `${value}\n${notes}` : value;
-  const result = await runPass(["insert", "-m", "-f", name], input);
-  if (result.code !== 0) {
-    throw new Error(`PASS_FAILED: ${result.stderr.trim() || `pass insert exited ${result.code}`}`);
-  }
-  return { name };
+  await assertStore();
+  return withWriteLock(name, async () => {
+    const strict = nameError(name);
+    if (strict && !(overwrite && (await exists(name)))) {
+      throw new Error(`INVALID_NAME: ${strict}`);
+    }
+    if (!overwrite && (await exists(name))) {
+      throw new Error(`EXISTS: ${name} already exists.`);
+    }
+    await mkdir(path.dirname(entryPath(name)), { recursive: true, mode: 0o700 });
+    const input = notes ? `${value}\n${notes}` : value;
+    const result = await runPass(["insert", "-m", "-f", name], input);
+    if (result.code !== 0) {
+      throw new Error(`PASS_FAILED: ${result.stderr.trim() || `pass insert exited ${result.code}`}`);
+    }
+    return { name };
+  });
 }
 
 export async function removeEntry({
   name,
 }: RpcInput<typeof secretsRemove>) {
   checkedEntryName(name);
-  const result = await runPass(["rm", "-f", name]);
-  if (result.code !== 0) {
-    throw new Error(`PASS_FAILED: ${result.stderr.trim() || `pass rm exited ${result.code}`}`);
-  }
-  return { name };
+  return withWriteLock(name, async () => {
+    const result = await runPass(["rm", "-f", name]);
+    if (result.code !== 0) {
+      throw new Error(`PASS_FAILED: ${result.stderr.trim() || `pass rm exited ${result.code}`}`);
+    }
+    return { name };
+  });
 }

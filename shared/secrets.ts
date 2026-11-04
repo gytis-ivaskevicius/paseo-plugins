@@ -26,6 +26,7 @@ export function nameError(name: string): string | null {
   const problem = segmentsError(name);
   if (problem) return problem;
   for (const segment of name.split("/")) {
+    if (segment.startsWith(".")) return `"${segment}" cannot start with a dot.`;
     if (!SEGMENT.test(segment)) return `"${segment}" can only use letters, numbers, . _ @ + and -.`;
   }
   return null;

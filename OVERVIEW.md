@@ -1,29 +1,9 @@
-<!--
-OVERVIEW.md is required to list your plugin in the registry. Keep it beside
-paseo-plugin.json in your repository at the pinned commit and in your npm package.
-Replace this comment with useful facts before publishing.
+# Secrets
 
-This overview is for people choosing a plugin in Paseo, on the plugin page under
-its install command. README assumes a GitHub audience and includes technical
-details, installation instructions, and badges. Long, AI-generated READMEs leave
-people reading past that material to understand what the plugin does.
+Browse, add, reveal, copy, edit, and delete entries in an existing `pass` password store.
 
-Write these parts in order, including only what helps someone decide to install:
+The plugin reads the store directory directly to list entries, so opening the screen does not decrypt anything. Selecting an entry runs `pass show`; Reveal displays the value and Copy puts it on the clipboard. Add and edit send the value to `pass insert -m -f` on stdin, so it never appears in a command line.
 
-1. Describe what your plugin is and does in plain terms first.
-2. Explain how it works only when it is not obvious.
-3. Explain setup when needed: settings, accounts, tokens, providers, tools, or
-   other plugins. Include applicable daemon version and operating system
-   requirements. Setup guidance is allowed; installation instructions are not.
-4. Explain capabilities and settings worth understanding, what each option does,
-   what the plugin reads or sends and where, permissions, and known limits.
+Setup comes from the environment. `PASSWORD_STORE_DIR` selects the store, defaulting to `~/.password-store`. `PASS_BIN` selects the `pass` binary; otherwise the plugin looks on PATH and then in the Nix profile. Entries are written with `pass`, so the store layout, `.gpg-id`, and GPG keys stay unchanged.
 
-Length follows complexity; a theme needs one paragraph. Choose headings only
-when they help. Use sentence case and plain factual language, with no em dashes.
-Omit installation commands, badges, changelog, contributing or license sections,
-marketing, and unsupported claims. Avoid implementation filler such as empty
-cleanup functions, theme-token field lists, or lists of absent features.
-
-To translate the overview, add a whole copy beside this file named for the
-language, such as OVERVIEW.zh-CN.md. Readers in that language see it instead.
--->
+Names are validated before writing. Existing entries created by other `pass` tooling can still be opened, edited, and removed. The plugin does not rename, move, import, or export entries, and it does not generate or sync passwords.
