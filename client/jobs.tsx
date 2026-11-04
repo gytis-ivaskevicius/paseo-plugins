@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { describeCron, describeInterval, parseCron } from "../shared/cron";
 import type { Job, JobSpec, RunRecord } from "../shared/jobs";
-import { acknowledgeJob, createJob, deleteJob, listJobs, readJobLog, runJob, setJobEnabled, updateJob } from "../shared/jobs";
+import { acknowledgeJob, clearJobLog, createJob, deleteJob, listJobs, readJobLog, runJob, setJobEnabled, updateJob } from "../shared/jobs";
 import { refreshFailureAlert } from "./failure-alert";
 import { useLogFollow } from "./log-follow";
 import { JOBS_TITLE, type Pane, jobsScreenInput, paneFor, paneJobId, requestedJobId } from "./screen";
@@ -373,6 +373,7 @@ function JobDetail({
   const setEnabled = useRpc(setJobEnabled);
   const remove = useRpc(deleteJob);
   const readLog = useRpc(readJobLog);
+  const clearLog = useRpc(clearJobLog);
   const [working, setWorking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [log, setLog] = useState<{ text: string; truncated: boolean; path: string } | null>(null);
@@ -540,6 +541,22 @@ function JobDetail({
           {follow.following ? null : (
             <Button styles={styles} kind="ghost" label={logBusy ? "Loading…" : "Refresh log"} disabled={logBusy} onPress={() => void loadLog()} />
           )}
+          <Button
+            styles={styles}
+            kind="ghost"
+            label="Clear log"
+            disabled={working || logBusy}
+            onPress={() =>
+              void act(async function clearTheLog() {
+                await clearLog({ id: job.id });
+                // The pane is looking at a file that no longer has anything in
+                // it: stop the tail and repaint from the emptied file.
+                follow.stop();
+                await loadLog();
+                onNotice({ tone: "info", text: `Cleared the log of "${job.name}".` });
+              }, "Could not clear the log")
+            }
+          />
           {follow.following ? (
             <Text style={[styles.textBody, styles.textMuted]}>
               {follow.lines === null ? "Starting the tail…" : "Following live."}

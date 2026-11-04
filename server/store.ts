@@ -270,6 +270,22 @@ export async function appendRun(id: string, record: RunRecord): Promise<void> {
   await writeAtomic(path, `${kept.join("\n")}\n`);
 }
 
+/**
+ * Empties a job's log, and drops the rotated copy with it. Truncation rather
+ * than deletion: a run in progress holds an append handle, and on POSIX a
+ * deleted file would go on receiving output nobody can find.
+ */
+export async function clearLog(id: string): Promise<void> {
+  const path = logPath(id);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, "");
+  try {
+    await unlink(`${path}.1`);
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
+}
+
 /** Rotates the log once it passes a megabyte, before a run starts appending. */
 export async function rotateLogIfLarge(id: string): Promise<void> {
   const path = logPath(id);

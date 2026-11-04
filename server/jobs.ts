@@ -13,6 +13,7 @@ import type { Job, JobSpec, RunRecord, ScheduleSpec } from "../shared/jobs";
 import { arm, daemonTimezone, disarm, isRunning, nextRunAt, pidOf, problemFor, startRun, stopAll } from "./scheduler";
 import {
   LOG_TAIL_BYTES,
+  clearLog,
   ensureDirs,
   logPath,
   mutate,
@@ -239,6 +240,13 @@ export async function readJobLogHandler(input: { id: string }): Promise<{ text: 
     if (isMissing(error)) return { text: "", truncated: false, path };
     throw error;
   }
+}
+
+/** Empties the job's log; the run history and acknowledgements are untouched. */
+export async function clearJobLogHandler(input: { id: string }): Promise<Record<string, never>> {
+  await findJob(input.id);
+  await clearLog(input.id);
+  return {};
 }
 
 /**

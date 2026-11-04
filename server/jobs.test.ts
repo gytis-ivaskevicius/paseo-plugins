@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   acknowledgeJobHandler,
+  clearJobLogHandler,
   createJobHandler,
   deleteJobHandler,
   listJobsHandler,
@@ -151,6 +152,19 @@ describe("jobs", () => {
     // The first run is one interval out, not immediately on enable.
     expect(job.nextRun).not.toBeNull();
     expect(Date.parse(job.nextRun ?? "") - Date.now()).toBeGreaterThan(85_000);
+  });
+
+  it("empties the log without touching the run history", async () => {
+    const job = await createJobHandler(cronSpec("Noisy", "printf 'noise\\n'"));
+    await runJobHandler({ id: job.id });
+    await settle(job.id);
+    expect((await readJobLogHandler({ id: job.id })).text).toContain("noise");
+
+    await clearJobLogHandler({ id: job.id });
+    expect((await readJobLogHandler({ id: job.id })).text).toBe("");
+    const [after] = (await listJobsHandler()).jobs;
+    expect(after?.recentRuns).toHaveLength(1);
+    expect(after?.lastExitCode).toBe(0);
   });
 
   it("deletes the job and its files", async () => {

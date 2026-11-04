@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 
 import {
   acknowledgeJobHandler,
+  clearJobLogHandler,
   createJobHandler,
   deleteJobHandler,
   listJobsHandler,
@@ -15,6 +16,7 @@ import {
 } from "./server/jobs";
 import {
   acknowledgeJob,
+  clearJobLog,
   createJob,
   deleteJob,
   listJobs,
@@ -35,6 +37,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(readJobLog, readJobLogHandler);
   server.handle(readJobHealth, readJobHealthHandler);
   server.handle(acknowledgeJob, acknowledgeJobHandler);
+  server.handle(clearJobLog, clearJobLogHandler);
 
   // The daemon is the scheduler: its plugin subprocess holds one cron timer
   // per armed job, so arming happens on load and the cleanup stops the timers.

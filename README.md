@@ -87,6 +87,9 @@ plugin reinstall.
 **Follow** shows the log live by borrowing one of your open workspaces for a
 `tail -f`; it ends when you stop it, switch jobs or leave the screen.
 
+**Clear log** empties the job's log file, and the rotated one with it. The run
+history stays: what each run exited with and how long it took is not log data.
+
 **Run now** starts the job immediately without touching its schedule.
 
 ## When a job fails

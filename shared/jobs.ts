@@ -124,6 +124,12 @@ export const readJobLog = defineRpc({
   }),
 });
 
+export const clearJobLog = defineRpc({
+  name: "jobs.clear-log",
+  input: z.object({ id: z.string() }),
+  output: z.object({}),
+});
+
 /**
  * The cheap health check behind the sidebar's failure count. `jobs.list` reads
  * every history file; this reads only the last line of each, because the
