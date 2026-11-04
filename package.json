@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "description": "Paseo plugin: cron jobs for shell commands on any OS, managed entirely by the Paseo daemon",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gytis-ivaskevicius/paseo-cron.git"
+  },
+  "homepage": "https://github.com/gytis-ivaskevicius/paseo-cron#readme",
+  "keywords": [
+    "paseo",
+    "paseo-plugin",
+    "cron",
+    "scheduler",
+    "shell"
+  ],
   "type": "module",
   "files": [
     "paseo-plugin.json",

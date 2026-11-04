@@ -3,5 +3,6 @@
   "description": "Cron jobs for shell commands, run by the Paseo daemon on any OS",
   "requirements": {
     "paseo": ">=0.11.0"
-  }
+  },
+  "build": [["npm", "ci", "--omit=dev", "--ignore-scripts"]]
 }

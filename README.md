@@ -17,7 +17,17 @@ history and the failure badge are its work.
 ## Install
 
 ```
+paseo plugin install git:gytis-ivaskevicius/paseo-cron
+```
+
+Installing from Git runs the manifest's `build` step, which installs the one
+runtime dependency (`croner`) from the committed lock. For local development,
+point at the directory instead — a directory install runs no build step, so run
+`npm ci --omit=dev` there first:
+
+```
 paseo plugin install /absolute/path/to/paseo-cron
+paseo plugin reload paseo-cron      # after editing the source
 ```
 
 Then enable plugins on the daemon if you have not already (Settings → Plugins).
