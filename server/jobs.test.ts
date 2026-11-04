@@ -23,6 +23,7 @@ import {
   readJobLogHandler,
   runJobHandler,
   setJobEnabledHandler,
+  stopJobHandler,
   stopScheduler,
   updateJobHandler,
 } from "./jobs";
@@ -175,6 +176,21 @@ describe("jobs", () => {
     // The first run is one interval out, not immediately on enable.
     expect(job.nextRun).not.toBeNull();
     expect(Date.parse(job.nextRun ?? "") - Date.now()).toBeGreaterThan(85_000);
+  });
+
+  it("stops a running job and records the kill", async () => {
+    const job = await createJobHandler(cronSpec("Long", "sleep 30"));
+    await runJobHandler({ id: job.id });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const stopped = await stopJobHandler({ id: job.id });
+    expect(stopped.id).toBe(job.id);
+
+    await settle(job.id);
+    const [after] = (await listJobsHandler()).jobs;
+    expect(after?.running).toBe(false);
+    expect(after?.recentRuns[0]?.exitCode).not.toBe(0);
+    expect((await readJobLogHandler({ id: job.id })).text).toContain("killed by SIGTERM");
   });
 
   it("empties the log without touching the run history", async () => {

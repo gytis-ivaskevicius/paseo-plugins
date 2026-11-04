@@ -4,7 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { describeCron, describeInterval, parseCron } from "../shared/cron";
 import type { Job, JobSpec, RunRecord } from "../shared/jobs";
-import { acknowledgeJob, clearJobLog, createJob, deleteJob, listJobs, readJobLog, runJob, setJobEnabled, updateJob } from "../shared/jobs";
+import {
+  acknowledgeJob,
+  clearJobLog,
+  createJob,
+  deleteJob,
+  listJobs,
+  readJobLog,
+  runJob,
+  setJobEnabled,
+  stopJob,
+  updateJob,
+} from "../shared/jobs";
 import { refreshFailureAlert } from "./failure-alert";
 import { useLogFollow } from "./log-follow";
 import { JOBS_TITLE, type Pane, jobsScreenInput, paneFor, paneJobId, requestedJobId } from "./screen";
@@ -370,6 +381,7 @@ function JobDetail({
   onNotice: (notice: Notice) => void;
 }) {
   const run = useRpc(runJob);
+  const stop = useRpc(stopJob);
   const setEnabled = useRpc(setJobEnabled);
   const remove = useRpc(deleteJob);
   const readLog = useRpc(readJobLog);
@@ -455,6 +467,17 @@ function JobDetail({
         <Button
           styles={styles}
           kind="ghost"
+          label="Stop"
+          disabled={working || !job.running}
+          onPress={() =>
+            void act(async function stopRun() {
+              onChanged(await stop({ id: job.id }));
+              onNotice({ tone: "info", text: `Signalled "${job.name}" to stop.` });
+            }, "Could not stop the job")
+          }
+        />
+        <Button
+          styles={styles}
           label={job.enabled ? "Disable" : "Enable"}
           disabled={working}
           onPress={() =>

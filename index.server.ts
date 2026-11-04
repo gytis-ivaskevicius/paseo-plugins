@@ -11,6 +11,7 @@ import {
   runJobHandler,
   setJobEnabledHandler,
   startScheduler,
+  stopJobHandler,
   stopScheduler,
   updateJobHandler,
 } from "./server/jobs";
@@ -24,6 +25,7 @@ import {
   readJobLog,
   runJob,
   setJobEnabled,
+  stopJob,
   updateJob,
 } from "./shared/jobs";
 
@@ -38,6 +40,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(readJobHealth, readJobHealthHandler);
   server.handle(acknowledgeJob, acknowledgeJobHandler);
   server.handle(clearJobLog, clearJobLogHandler);
+  server.handle(stopJob, stopJobHandler);
 
   // The daemon is the scheduler: its plugin subprocess holds one cron timer
   // per armed job, so arming happens on load and the cleanup stops the timers.

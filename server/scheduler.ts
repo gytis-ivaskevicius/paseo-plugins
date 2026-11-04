@@ -33,6 +33,7 @@ interface JobSnapshot {
 interface Running {
   pid: number;
   startedAt: Date;
+  child: ChildProcess;
 }
 
 /** A spawned run: the object exists now, `completion` settles when it is over. */
@@ -145,6 +146,31 @@ export function pidOf(id: string): number | null {
   return running.get(id)?.pid ?? null;
 }
 
+/**
+ * Signals a running job's process group. The child is spawned detached, so a
+ * command that is itself a shell (`a && b`, a loop) has its grandchildren in
+ * the same group and they get the signal too — killing only the shell would
+ * leave the work running with no record.
+ *
+ * SIGTERM only: a process that ignores it is a process this plugin should not
+ * be guessing about. The run still gets its history line, with a non-zero
+ * exit and a `killed by` note in the log.
+ */
+export function stopRun(id: string): boolean {
+  const run = running.get(id);
+  if (run === undefined) return false;
+  try {
+    if (process.platform === "win32") run.child.kill("SIGTERM");
+    else process.kill(-run.pid, "SIGTERM");
+    return true;
+  } catch (error) {
+    // ESRCH: it exited between the check and the signal. Nothing to stop.
+    if ((error as { code?: string }).code === "ESRCH") return false;
+    console.error(`[paseo-cron] could not stop ${id}: ${errorMessage(error)}`);
+    return false;
+  }
+}
+
 /** Why a job could not be armed, or null when it is fine. */
 export function problemFor(id: string): string | null {
   return problems.get(id) ?? null;
@@ -228,6 +254,8 @@ async function spawnRun(job: JobSnapshot, manual: boolean): Promise<Run> {
       cwd: expandHome(job.cwd) ?? homedir(),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // One process group per run, so Stop reaches the whole command tree.
+      detached: process.platform !== "win32",
     });
   } catch (error) {
     write(`=== ${new Date().toISOString()} could not start: ${errorMessage(error)}\n`);
@@ -235,7 +263,7 @@ async function spawnRun(job: JobSnapshot, manual: boolean): Promise<Run> {
     return { completion: record(job.id, startedAt, 1) };
   }
 
-  if (child.pid !== undefined) running.set(job.id, { pid: child.pid, startedAt });
+  if (child.pid !== undefined) running.set(job.id, { pid: child.pid, startedAt, child });
   child.stdout?.on("data", (chunk: Buffer) => write(chunk.toString("utf8")));
   child.stderr?.on("data", (chunk: Buffer) => write(chunk.toString("utf8")));
 

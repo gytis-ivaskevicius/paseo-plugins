@@ -111,6 +111,16 @@ export const runJob = defineRpc({
   output: JobSchema,
 });
 
+/**
+ * Signals the run in progress. The job keeps its schedule; only this run ends,
+ * with a non-zero exit and a `killed by` line in the log.
+ */
+export const stopJob = defineRpc({
+  name: "jobs.stop",
+  input: z.object({ id: z.string() }),
+  output: JobSchema,
+});
+
 export const setJobEnabled = defineRpc({
   name: "jobs.set-enabled",
   input: z.object({ id: z.string(), enabled: z.boolean() }),

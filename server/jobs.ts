@@ -10,7 +10,18 @@ import { Cron } from "croner";
 
 import { describeCron, describeInterval, parseCron } from "../shared/cron";
 import type { Job, JobSpec, RunRecord, ScheduleSpec } from "../shared/jobs";
-import { arm, daemonTimezone, disarm, isRunning, nextRunAt, pidOf, problemFor, startRun, stopAll } from "./scheduler";
+import {
+  arm,
+  daemonTimezone,
+  disarm,
+  isRunning,
+  nextRunAt,
+  pidOf,
+  problemFor,
+  startRun,
+  stopAll,
+  stopRun,
+} from "./scheduler";
 import {
   LOG_TAIL_BYTES,
   clearLog,
@@ -247,6 +258,13 @@ export async function readJobLogHandler(input: { id: string }): Promise<{ text: 
   const path = logPath(input.id);
   // `readTail` already treats a missing file as an empty tail.
   return { ...(await readTail(path, LOG_TAIL_BYTES)), path };
+}
+
+/** Stops the run in progress. Nothing to stop is not an error the user caused. */
+export async function stopJobHandler(input: { id: string }): Promise<Job> {
+  const job = await findJob(input.id);
+  stopRun(job.id);
+  return buildJob(job);
 }
 
 /** Empties the job's log; the run history and acknowledgements are untouched. */

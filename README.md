@@ -1,5 +1,7 @@
 # paseo-cron
 
+[![ci](https://github.com/gytis-ivaskevicius/paseo-cron/actions/workflows/ci.yml/badge.svg)](https://github.com/gytis-ivaskevicius/paseo-cron/actions/workflows/ci.yml)
+
 A Paseo plugin that schedules shell commands **without an operating-system
 scheduler**. No launchd agents, no systemd timers, no crontab: the Paseo daemon
 holds the timers inside the plugin's own server process and spawns the commands
@@ -104,6 +106,10 @@ running: switching jobs or leaving the screen ends it.
 history stays: what each run exited with and how long it took is not log data.
 
 **Run now** starts the job immediately without touching its schedule.
+**Stop** signals the run in progress (its whole process group), so a command
+that hangs or misbehaves does not block its own next run. The job keeps its
+schedule; the run is recorded with a non-zero exit and a `killed by SIGTERM`
+line in the log.
 
 ## When a job fails
 
