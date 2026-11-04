@@ -2,7 +2,7 @@
 
 A Paseo plugin for browsing and managing a [`pass`](https://www.passwordstore.org/) store.
 
-Agent usage: see [SKILL.md](SKILL.md).
+Agent usage: see [skills/paseo-secrets/SKILL.md](skills/paseo-secrets/SKILL.md).
 
 ## Features
 
