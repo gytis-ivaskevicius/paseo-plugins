@@ -21,7 +21,7 @@ A Paseo plugin for browsing and managing a [`pass`](https://www.passwordstore.or
 ## Install
 
 ```bash
-paseo plugin install /home/celty/Projects/paseo-secrets
+paseo plugin install ~/Projects/paseo-secrets
 ```
 
 Then open **Secrets** in the sidebar.
