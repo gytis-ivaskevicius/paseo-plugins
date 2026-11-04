@@ -142,14 +142,12 @@ function Action({
   label,
   onPress,
   theme,
-  disabled,
   danger,
 }: {
   icon: string;
   label: string;
   onPress: () => void;
   theme: Theme;
-  disabled?: boolean;
   danger?: boolean;
 }) {
   const color = danger ? theme.colors.statusDanger : theme.colors.foreground;
@@ -157,7 +155,6 @@ function Action({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: "row",
@@ -167,7 +164,7 @@ function Action({
         paddingHorizontal: 10,
         borderRadius: 8,
         backgroundColor: theme.colors.surface2,
-        opacity: disabled ? 0.5 : pressed ? 0.7 : 1,
+        opacity: pressed ? 0.7 : 1,
       })}
     >
       <Icon name={icon} size={16} color={color} />
@@ -227,12 +224,14 @@ function EntryDetail({
   layout,
   onClose,
   onDeleted,
+  onEdited,
 }: {
   name: string;
   theme: Theme;
   layout: Layout;
   onClose: (() => void) | null;
   onDeleted: () => void;
+  onEdited: () => Promise<void>;
 }) {
   const styles = useStyles({ theme, layout });
   const getSecret = useRpc(secretsGet);
@@ -244,6 +243,7 @@ function EntryDetail({
     retry: false,
   });
   const [revealed, setRevealed] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -309,6 +309,7 @@ function EntryDetail({
                 theme={theme}
               />
               <Action icon="Copy" label="Copy" onPress={() => void copyValue()} theme={theme} />
+              <Action icon="Pencil" label="Edit" onPress={() => setEditing(true)} theme={theme} />
               <Action
                 icon="Trash2"
                 label="Delete"
@@ -328,6 +329,21 @@ function EntryDetail({
           </>
         ) : null}
       </ScrollView>
+
+      {editing && detail.data ? (
+        <EntryModal
+          theme={theme}
+          layout={layout}
+          initial={{ name, value: detail.data.value, notes: detail.data.notes }}
+          onClose={() => setEditing(false)}
+          onSaved={async () => {
+            await detail.refetch();
+            await onEdited();
+            setEditing(false);
+            toast.show("Entry updated", { variant: "success" });
+          }}
+        />
+      ) : null}
 
       <Modal
         title="Delete entry?"
@@ -366,32 +382,37 @@ function EntryDetail({
   );
 }
 
-function AddEntryModal({
+function EntryModal({
   theme,
   layout,
+  initial,
   onClose,
   onSaved,
 }: {
   theme: Theme;
   layout: Layout;
+  initial?: { name: string; value: string; notes: string };
   onClose: () => void;
-  onSaved: (name: string) => void;
+  onSaved: (name: string) => Promise<void>;
 }) {
   const styles = useStyles({ theme, layout });
+  const editing = initial !== undefined;
   const setSecret = useRpc(secretsSet);
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [notes, setNotes] = useState("");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [value, setValue] = useState(initial?.value ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   async function save(overwrite: boolean) {
-    const problem = nameError(name);
-    if (problem) {
-      setConfirming(false);
-      setError(problem);
-      return;
+    if (!editing) {
+      const problem = nameError(name);
+      if (problem) {
+        setConfirming(false);
+        setError(problem);
+        return;
+      }
     }
     const valueProblem = valueError(value);
     if (valueProblem) {
@@ -399,6 +420,7 @@ function AddEntryModal({
       setError(valueProblem);
       return;
     }
+    const replace = editing || overwrite;
     setSaving(true);
     setError(null);
     try {
@@ -406,12 +428,12 @@ function AddEntryModal({
         name,
         value,
         notes: notes === "" ? undefined : notes,
-        overwrite,
+        overwrite: replace,
       });
-      onSaved(name);
+      await onSaved(name);
     } catch (caught) {
       const body = messageOf(caught);
-      if (!overwrite && body.startsWith("EXISTS:")) {
+      if (!replace && body.startsWith("EXISTS:")) {
         setConfirming(true);
         return;
       }
@@ -423,7 +445,7 @@ function AddEntryModal({
 
   return (
     <Modal
-      title={confirming ? "Replace entry?" : "Add entry"}
+      title={editing ? "Edit entry" : confirming ? "Replace entry?" : "Add entry"}
       open
       onOpenChange={(open) => {
         if (!open) onClose();
@@ -455,15 +477,23 @@ function AddEntryModal({
           <View style={styles.form}>
             <View style={styles.field}>
               <Text style={styles.label}>Name</Text>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="service/resource"
-                placeholderTextColor={theme.colors.foregroundMuted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-              />
+              {editing ? (
+                <View style={styles.valueBox}>
+                  <Text selectable style={styles.notes}>
+                    {name}
+                  </Text>
+                </View>
+              ) : (
+                <TextInput
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="service/resource"
+                  placeholderTextColor={theme.colors.foregroundMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                />
+              )}
             </View>
             <View style={styles.field}>
               <Text style={styles.label}>Value</Text>
@@ -492,9 +522,9 @@ function AddEntryModal({
             {error ? <Text style={styles.formError}>{error}</Text> : null}
             <ModalActions
               styles={styles}
-              cancelLabel="Cancel add"
+              cancelLabel={editing ? "Cancel edit" : "Cancel add"}
               onCancel={onClose}
-              confirmLabel="Save entry"
+              confirmLabel={editing ? "Save changes" : "Save entry"}
               confirmText="Save"
               busyText="Saving…"
               busy={saving}
@@ -532,10 +562,10 @@ export function SecretsScreen({ theme, layout }: PluginScreenProps) {
   }
 
   async function saved(name: string) {
-    setAdding(false);
     setFilter("");
     setSelected(name);
     await list.refetch();
+    setAdding(false);
     toast.show("Entry saved", { variant: "success" });
   }
 
@@ -613,6 +643,9 @@ export function SecretsScreen({ theme, layout }: PluginScreenProps) {
       layout={layout}
       onClose={layout.compact ? () => setSelected(null) : null}
       onDeleted={() => void deleted()}
+      onEdited={async () => {
+        await list.refetch();
+      }}
     />
   ) : (
     <View style={styles.placeholder}>
@@ -632,11 +665,13 @@ export function SecretsScreen({ theme, layout }: PluginScreenProps) {
         </View>
       )}
       {adding ? (
-        <AddEntryModal
+        <EntryModal
           theme={theme}
           layout={layout}
           onClose={() => setAdding(false)}
-          onSaved={(name) => void saved(name)}
+          onSaved={async (name) => {
+            await saved(name);
+          }}
         />
       ) : null}
     </View>

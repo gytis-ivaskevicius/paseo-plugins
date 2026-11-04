@@ -44,11 +44,6 @@ async function resolvePass(): Promise<string> {
   throw new Error("PASS_NOT_FOUND: pass was not found. Set PASS_BIN or put pass on PATH.");
 }
 
-function checkedName(name: string): void {
-  const problem = nameError(name);
-  if (problem) throw new Error(`INVALID_NAME: ${problem}`);
-}
-
 function checkedEntryName(name: string): void {
   const problem = entryNameError(name);
   if (problem) throw new Error(`INVALID_NAME: ${problem}`);
@@ -159,7 +154,12 @@ export async function setEntry({
   notes,
   overwrite,
 }: RpcInput<typeof secretsSet>) {
-  checkedName(name);
+  const relaxed = entryNameError(name);
+  if (relaxed) throw new Error(`INVALID_NAME: ${relaxed}`);
+  const strict = nameError(name);
+  if (strict && !(overwrite && (await exists(name)))) {
+    throw new Error(`INVALID_NAME: ${strict}`);
+  }
   const problem = valueError(value);
   if (problem) {
     throw new Error(`${value === "" ? "EMPTY_VALUE" : "INVALID_VALUE"}: ${problem}`);
