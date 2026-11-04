@@ -2,6 +2,8 @@
 
 A Paseo plugin for browsing and managing a [`pass`](https://www.passwordstore.org/) store.
 
+Agent usage: see [SKILL.md](SKILL.md).
+
 ## Features
 
 - List every entry without decrypting it.
