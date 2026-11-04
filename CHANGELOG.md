@@ -12,6 +12,8 @@ scheduler:
 - Live pid, precise duration, overlap skip with a log line, and "Run now" that
   returns the job as soon as the run is spawned, so the pane shows it running.
 - Clear log: empties a job's log without touching its run history.
+- Follow re-reads the log tail instead of borrowing a workspace terminal for
+  `tail -f`: one less moving part, no workspace required, nothing left running.
 - Cron's day-of-month / day-of-week **or** semantics; no cartesian-product entry
   cap.
 - Job store, logs and history in `$PASEO_HOME/plugin-data/paseo-cron/`.

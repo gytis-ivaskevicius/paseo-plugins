@@ -84,8 +84,9 @@ rotated once it passes 1 MB, and the history keeps its last two hundred runs.
 Everything lives under `$PASEO_HOME/plugin-data/paseo-cron/` and survives a
 plugin reinstall.
 
-**Follow** shows the log live by borrowing one of your open workspaces for a
-`tail -f`; it ends when you stop it, switch jobs or leave the screen.
+**Follow** re-reads the log every second while the pane is looking, so a run's
+output appears as it is written. It needs no workspace and leaves nothing
+running: switching jobs or leaving the screen ends it.
 
 **Clear log** empties the job's log file, and the rotated one with it. The run
 history stays: what each run exited with and how long it took is not log data.
