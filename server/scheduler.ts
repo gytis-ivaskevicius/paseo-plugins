@@ -38,6 +38,12 @@ interface Running {
 const armed = new Map<string, Cron>();
 const running = new Map<string, Running>();
 const problems = new Map<string, string>();
+/**
+ * Jobs whose `fire` has been entered but whose process is not spawned yet.
+ * Set synchronously, before the first await, so a cron trigger and a "Run now"
+ * arriving together cannot both decide the job is idle and spawn two copies.
+ */
+const inflight = new Set<string>();
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -89,8 +95,14 @@ export function arm(job: StoredJob): void {
       job.schedule.type === "cron"
         ? new Cron(job.schedule.expression, () => void fire(snapshot))
         : // A one-second pattern with a minimum gap is how croner expresses
-          // "every N seconds"; no expression can name an arbitrary Interval.
-          new Cron("* * * * * *", { interval: job.schedule.seconds }, () => void fire(snapshot));
+          // "every N seconds"; no expression can name an arbitrary interval.
+          // `startAt` pushes the first run one interval out, so enabling a
+          // six-hour job does not run it on the spot.
+          new Cron(
+            "* * * * * *",
+            { interval: job.schedule.seconds, startAt: new Date(Date.now() + job.schedule.seconds * 1000) },
+            () => void fire(snapshot),
+          );
     armed.set(job.id, cron);
   } catch (error) {
     problems.set(job.id, errorMessage(error));
@@ -119,7 +131,7 @@ export function nextRunAt(id: string): string | null {
 }
 
 export function isRunning(id: string): boolean {
-  return running.has(id);
+  return inflight.has(id) || running.has(id);
 }
 
 export function pidOf(id: string): number | null {
@@ -139,7 +151,7 @@ export function problemFor(id: string): string | null {
  * going, so a manual press cannot stack two copies of a slow command.
  */
 export async function runNow(job: StoredJob): Promise<void> {
-  if (running.has(job.id)) throw new Error("That job is already running");
+  if (isRunning(job.id)) throw new Error("That job is already running");
   await fire({ id: job.id, command: job.command, cwd: job.cwd }, true);
 }
 
@@ -150,10 +162,19 @@ export async function runNow(job: StoredJob): Promise<void> {
  * takes longer than its interval is a job whose schedule is wrong.
  */
 async function fire(job: JobSnapshot, manual = false): Promise<void> {
-  if (running.has(job.id)) {
+  if (inflight.has(job.id)) {
     await appendSkip(job.id);
     return;
   }
+  inflight.add(job.id);
+  try {
+    await run(job, manual);
+  } finally {
+    inflight.delete(job.id);
+  }
+}
+
+async function run(job: JobSnapshot, manual: boolean): Promise<void> {
   const startedAt = new Date();
   let stream: ReturnType<typeof createWriteStream>;
   try {

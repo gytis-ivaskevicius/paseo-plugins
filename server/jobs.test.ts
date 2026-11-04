@@ -124,7 +124,9 @@ describe("jobs", () => {
       schedule: { type: "interval", seconds: 90 },
     });
     expect(job.schedule).toEqual({ type: "interval", seconds: 90, description: "Every 90 seconds" });
+    // The first run is one interval out, not immediately on enable.
     expect(job.nextRun).not.toBeNull();
+    expect(Date.parse(job.nextRun ?? "") - Date.now()).toBeGreaterThan(85_000);
   });
 
   it("deletes the job and its files", async () => {

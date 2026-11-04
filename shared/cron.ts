@@ -8,14 +8,6 @@
  * scheduler library. Scheduling itself is not here — the daemon does that.
  */
 
-export interface CalendarEntry {
-  minute?: number;
-  hour?: number;
-  day?: number;
-  month?: number;
-  weekday?: number;
-}
-
 export const CALENDAR_FIELDS = ["minute", "hour", "day", "month", "weekday"] as const;
 export type CalendarField = (typeof CALENDAR_FIELDS)[number];
 
