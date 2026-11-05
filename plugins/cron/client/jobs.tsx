@@ -1,0 +1,1115 @@
+import { type PluginOpenScreenInput, type PluginScreenProps, type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
+import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { describeCron, describeInterval, parseCron } from "../shared/cron";
+import type { Job, JobSpec, RunRecord } from "../shared/jobs";
+import {
+  acknowledgeJob,
+  clearJobLog,
+  createJob,
+  deleteJob,
+  listJobs,
+  readJobLog,
+  runJob,
+  setJobEnabled,
+  stopJob,
+  updateJob,
+} from "../shared/jobs";
+import { refreshFailureAlert } from "./failure-alert";
+import { useLogFollow } from "./log-follow";
+import { JOBS_TITLE, type Pane, jobsScreenInput, paneFor, paneJobId, requestedJobId } from "./screen";
+
+/**
+ * The screen: the plugin's jobs on the left, and on the right whichever of
+ * three things is open — a job's detail, the form editing it, or the form for
+ * a new one. Compact shows one pane at a time.
+ *
+ * Async **function expressions**, never async arrows, anywhere in this file:
+ * the app `eval`s the client bundle, and Hermes's eval compiler on iOS and
+ * Android evaluates an async arrow to `undefined` instead of a function.
+ * Desktop runs on V8 and never sees it. Same reason every closure over a
+ * list element goes through `.map`, never a `for…of` body.
+ */
+
+/**
+ * Module-scope caches, because the screen is unmounted whenever the user
+ * navigates to a workspace and mounted fresh on the way back. The list
+ * repaints before the first load answers; the open pane comes back; and a
+ * half-typed form is still there, keyed by what it was editing so a draft for
+ * one job is never adopted by another.
+ *
+ * A screen opened with a `job` param starts on that job instead — that is how
+ * the sidebar's popover opens a failing one. The param is read on mount only:
+ * every `openScreen` mounts a new instance, so there is nothing to follow
+ * afterwards, and presses inside the screen change the pane without touching
+ * the URL. `lastJobsScreenInput` is how the sidebar row and the Command Center
+ * reopen the screen on the job it was left on.
+ */
+let cachedJobs: Job[] | null = null;
+let cachedPane: Pane = { kind: "empty" };
+let cachedDraft: { key: string; draft: Draft } | null = null;
+
+/** How often the list re-reads the daemon while the surface is on screen. */
+const REFRESH_MS = 15_000;
+/** And while a job is running, when the result is seconds away. */
+const RUNNING_REFRESH_MS = 2_000;
+
+/** Whether the list in hand has job `id`; null names no job, so it is trivially listed. */
+function isListed(id: string | null): boolean {
+  return id === null || (cachedJobs ?? []).some((job) => job.id === id);
+}
+
+/** Opens the screen on the job that was open when it was left. */
+export function lastJobsScreenInput(): PluginOpenScreenInput {
+  return jobsScreenInput(paneJobId(cachedPane));
+}
+
+/**
+ * A one-off outcome — a job created, a run started, a log that would not read.
+ * Delivered as a host toast rather than a banner in the surface: it is an event
+ * rather than a state, and the surface's own `error` banner is the state.
+ */
+interface Notice {
+  tone: "info" | "danger";
+  text: string;
+}
+
+function withAlpha(color: string, alpha: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? `${color}${alpha}` : color;
+}
+
+function relativeTime(iso: string): string {
+  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (!Number.isFinite(seconds)) return iso;
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+function absoluteTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
+
+function duration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes} min ${seconds} s`;
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+type Tone = "muted" | "accent" | "danger";
+
+/**
+ * One word for the row. Precedence: a schedule the daemon could not arm, a
+ * job the user turned off, a run in progress, then the last run recorded.
+ */
+function statusOf(job: Job): { label: string; tone: Tone } {
+  if (job.problem !== null) return { label: "Error", tone: "danger" };
+  if (!job.enabled) return { label: "Disabled", tone: "muted" };
+  if (job.running) return { label: "Running", tone: "accent" };
+  const exit = job.lastExitCode;
+  if (exit !== null && exit !== 0) return { label: `Failed (exit ${exit})`, tone: "danger" };
+  if (exit === null) return { label: "Never run", tone: "muted" };
+  return { label: "OK", tone: "muted" };
+}
+
+// ---------------------------------------------------------------------------
+// Styles
+
+function useStyles({ theme, layout }: PluginSurfaceProps) {
+  return useMemo(() => {
+    const { colors } = theme;
+    const separator = withAlpha(colors.foregroundMuted, "33");
+    const faint = withAlpha(colors.foregroundMuted, "14");
+    const pad = layout.compact ? 12 : 16;
+    const mono = { fontFamily: layout.platform === "ios" ? "Menlo" : "monospace" } as const;
+    return {
+      screen: { flex: 1, backgroundColor: colors.surface0 },
+      header: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        gap: 8,
+        paddingHorizontal: pad,
+        paddingVertical: layout.compact ? 10 : 12,
+        borderBottomWidth: 1,
+        borderBottomColor: separator,
+      },
+      title: { color: colors.foreground, fontSize: layout.compact ? 17 : 19, fontWeight: "600" as const },
+      spacer: { flex: 1 },
+      body: { flex: 1, flexDirection: "row" as const },
+      // On the wide layout the list and the pane split the body evenly.
+      list: {
+        flex: 1,
+        borderRightWidth: layout.compact ? 0 : 1,
+        borderRightColor: separator,
+      },
+      pane: { flex: 1 },
+      paneContent: { padding: pad, gap: 14 },
+      row: {
+        paddingHorizontal: pad,
+        paddingVertical: 10,
+        gap: 3,
+        borderBottomWidth: 1,
+        borderBottomColor: separator,
+      },
+      rowSelected: { backgroundColor: faint },
+      rowPressed: { opacity: 0.7 },
+      rowTop: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
+      rowName: { color: colors.foreground, fontSize: 14, fontWeight: "600" as const, flex: 1 },
+      rowLine: { color: colors.foregroundMuted, fontSize: 12 },
+      pill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1 },
+      pillText: { fontSize: 11, fontWeight: "600" as const },
+      pillMuted: { borderColor: separator },
+      pillAccent: { borderColor: colors.accent },
+      pillDanger: { borderColor: colors.statusDanger },
+      textMuted: { color: colors.foregroundMuted },
+      textAccent: { color: colors.accent },
+      textDanger: { color: colors.statusDanger },
+      textBody: { color: colors.foreground, fontSize: 13, lineHeight: 18 },
+      heading: { color: colors.foreground, fontSize: 18, fontWeight: "600" as const },
+      sectionTitle: {
+        color: colors.foregroundMuted,
+        fontSize: 11,
+        fontWeight: "600" as const,
+        textTransform: "uppercase" as const,
+        letterSpacing: 0.6,
+      },
+      label: { color: colors.foregroundMuted, fontSize: 12, marginBottom: 4 },
+      code: {
+        ...mono,
+        color: colors.foreground,
+        fontSize: 12,
+        lineHeight: 17,
+        backgroundColor: faint,
+        borderRadius: 6,
+        padding: 10,
+      },
+      logBox: { backgroundColor: faint, borderRadius: 6, maxHeight: layout.compact ? 260 : 360 },
+      logText: { ...mono, color: colors.foreground, fontSize: 11, lineHeight: 15, padding: 10 },
+      input: {
+        color: colors.foreground,
+        borderWidth: 1,
+        borderColor: separator,
+        borderRadius: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        fontSize: 13,
+      },
+      inputMono: { ...mono, minHeight: 72, textAlignVertical: "top" as const },
+      actions: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8, alignItems: "center" as const },
+      button: { backgroundColor: colors.accent, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 7 },
+      buttonLabel: { color: colors.accentForeground, fontSize: 13, fontWeight: "600" as const },
+      ghostButton: { borderWidth: 1, borderColor: separator, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 7 },
+      ghostButtonLabel: { color: colors.foreground, fontSize: 13 },
+      dangerButton: { borderWidth: 1, borderColor: colors.statusDanger, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 7 },
+      dangerButtonLabel: { color: colors.statusDanger, fontSize: 13, fontWeight: "600" as const },
+      iconButton: { padding: 6, borderRadius: 6 },
+      chip: { borderWidth: 1, borderColor: separator, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+      chipOn: { borderColor: colors.accent, backgroundColor: withAlpha(colors.accent, "22") },
+      chipText: { color: colors.foreground, fontSize: 12 },
+      disabled: { opacity: 0.5 },
+      notice: { marginHorizontal: pad, marginTop: 10, padding: 10, borderRadius: 6, borderWidth: 1 },
+      noticeDanger: { borderColor: colors.statusDanger },
+      noticeText: { color: colors.foreground, fontSize: 13 },
+      empty: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, padding: 24, gap: 8 },
+      emptyText: { color: colors.foregroundMuted, fontSize: 13, textAlign: "center" as const, maxWidth: 420 },
+      runRow: { flexDirection: "row" as const, gap: 10, alignItems: "baseline" as const, paddingVertical: 3 },
+      runTime: { color: colors.foreground, fontSize: 12, flex: 1 },
+      runMeta: { color: colors.foregroundMuted, fontSize: 12 },
+      facts: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 14 },
+      fact: { gap: 2 },
+      factValue: { color: colors.foreground, fontSize: 13 },
+    };
+  }, [theme, layout.compact, layout.platform]);
+}
+
+type Styles = ReturnType<typeof useStyles>;
+
+// ---------------------------------------------------------------------------
+// Small pieces
+
+function Pill({ styles, label, tone }: { styles: Styles; label: string; tone: Tone }) {
+  const frame = tone === "danger" ? styles.pillDanger : tone === "accent" ? styles.pillAccent : styles.pillMuted;
+  const text = tone === "danger" ? styles.textDanger : tone === "accent" ? styles.textAccent : styles.textMuted;
+  return (
+    <View style={[styles.pill, frame]}>
+      <Text style={[styles.pillText, text]}>{label}</Text>
+    </View>
+  );
+}
+
+function Button({
+  styles,
+  label,
+  onPress,
+  kind = "primary",
+  disabled = false,
+}: {
+  styles: Styles;
+  label: string;
+  onPress: () => void;
+  kind?: "primary" | "ghost" | "danger";
+  disabled?: boolean;
+}) {
+  const frame = kind === "primary" ? styles.button : kind === "ghost" ? styles.ghostButton : styles.dangerButton;
+  const text =
+    kind === "primary" ? styles.buttonLabel : kind === "ghost" ? styles.ghostButtonLabel : styles.dangerButtonLabel;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [frame, disabled ? styles.disabled : null, pressed ? styles.rowPressed : null]}
+    >
+      <Text style={text}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function Chip({ styles, label, on, onPress }: { styles: Styles; label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: on }}
+      onPress={onPress}
+      style={[styles.chip, on ? styles.chipOn : null]}
+    >
+      <Text style={styles.chipText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function Section({ styles, title, children }: { styles: Styles; title: string; children: React.ReactNode }) {
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The list
+
+function JobRow({
+  styles,
+  job,
+  selected,
+  onPress,
+}: {
+  styles: Styles;
+  job: Job;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const status = statusOf(job);
+  const last = job.recentRuns[0];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${job.name}, ${status.label}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, selected ? styles.rowSelected : null, pressed ? styles.rowPressed : null]}
+    >
+      <View style={styles.rowTop}>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {job.name}
+        </Text>
+        <Pill styles={styles} label={status.label} tone={status.tone} />
+      </View>
+      <Text style={styles.rowLine} numberOfLines={1}>
+        {job.schedule.description}
+      </Text>
+      {last !== undefined ? (
+        <Text style={styles.rowLine} numberOfLines={1}>
+          Last run {relativeTime(last.finishedAt)} · {duration(last.durationMs)}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The detail pane
+
+function RunLine({ styles, run }: { styles: Styles; run: RunRecord }) {
+  return (
+    <View style={styles.runRow}>
+      <Text style={styles.runTime}>{absoluteTime(run.startedAt)}</Text>
+      <Text style={styles.runMeta}>{duration(run.durationMs)}</Text>
+      <Text style={[styles.runMeta, run.exitCode === 0 ? null : styles.textDanger]}>
+        {run.exitCode === 0 ? "exit 0" : `exit ${run.exitCode}`}
+      </Text>
+    </View>
+  );
+}
+
+function JobDetail({
+  styles,
+  job,
+  compact,
+  timezone,
+  foreground,
+  onBack,
+  onEdit,
+  onChanged,
+  onDeleted,
+  onNotice,
+}: {
+  styles: Styles;
+  job: Job;
+  compact: boolean;
+  timezone: string;
+  foreground: string;
+  onBack: () => void;
+  onEdit: () => void;
+  onChanged: (job: Job) => void;
+  onDeleted: () => void;
+  onNotice: (notice: Notice) => void;
+}) {
+  const run = useRpc(runJob);
+  const stop = useRpc(stopJob);
+  const setEnabled = useRpc(setJobEnabled);
+  const remove = useRpc(deleteJob);
+  const readLog = useRpc(readJobLog);
+  const clearLog = useRpc(clearJobLog);
+  const [working, setWorking] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [log, setLog] = useState<{ text: string; truncated: boolean; path: string } | null>(null);
+  const [logBusy, setLogBusy] = useState(false);
+  const follow = useLogFollow(job);
+  const status = statusOf(job);
+
+  const loadLog = useCallback(
+    async function loadLog() {
+      setLogBusy(true);
+      try {
+        setLog(await readLog({ id: job.id }));
+      } catch (error) {
+        onNotice({ tone: "danger", text: `Could not read the log: ${errorText(error)}` });
+      } finally {
+        setLogBusy(false);
+      }
+    },
+    [job.id, readLog, onNotice],
+  );
+
+  // A fresh job, or a run that just finished, is the moment to look again.
+  // Not while following: the tail is already ahead of anything a re-read would
+  // find, and repainting the pane from the file would fight it.
+  const lastFinished = job.recentRuns[0]?.finishedAt ?? null;
+  useEffect(() => {
+    if (follow.following) return;
+    void loadLog();
+  }, [follow.following, loadLog, lastFinished]);
+
+  // The follow's own failures are events, so they go to the same toast the
+  // rest of this pane reports through rather than into the log box.
+  const followError = follow.error;
+  useEffect(() => {
+    if (followError !== null) onNotice({ tone: "danger", text: `Could not follow the log: ${followError}` });
+  }, [followError, onNotice]);
+
+  useEffect(() => setConfirmDelete(false), [job.id]);
+
+  const act = useCallback(
+    async function act(work: () => Promise<void>, failure: string) {
+      setWorking(true);
+      try {
+        await work();
+      } catch (error) {
+        onNotice({ tone: "danger", text: `${failure}: ${errorText(error)}` });
+      } finally {
+        setWorking(false);
+      }
+    },
+    [onNotice],
+  );
+
+  return (
+    <ScrollView style={styles.pane} contentContainerStyle={styles.paneContent}>
+      <View style={styles.rowTop}>
+        {compact ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Back to the list" onPress={onBack} style={styles.iconButton}>
+            <Icon name="ArrowLeft" size={18} color={foreground} />
+          </Pressable>
+        ) : null}
+        <Text style={[styles.heading, { flex: 1 }]}>{job.name}</Text>
+        <Pill styles={styles} label={status.label} tone={status.tone} />
+      </View>
+
+      {job.problem !== null ? <Text style={[styles.textBody, styles.textDanger]}>{job.problem}</Text> : null}
+      <View style={styles.actions}>
+        <Button
+          styles={styles}
+          label="Run now"
+          disabled={working || job.running}
+          onPress={() =>
+            void act(async function runNow() {
+              onChanged(await run({ id: job.id }));
+              onNotice({ tone: "info", text: `Started "${job.name}".` });
+            }, "Could not start the job")
+          }
+        />
+        <Button
+          styles={styles}
+          kind="ghost"
+          label="Stop"
+          disabled={working || !job.running}
+          onPress={() =>
+            void act(async function stopRun() {
+              onChanged(await stop({ id: job.id }));
+              onNotice({ tone: "info", text: `Signalled "${job.name}" to stop.` });
+            }, "Could not stop the job")
+          }
+        />
+        <Button
+          styles={styles}
+          label={job.enabled ? "Disable" : "Enable"}
+          disabled={working}
+          onPress={() =>
+            void act(async function toggle() {
+              onChanged(await setEnabled({ id: job.id, enabled: !job.enabled }));
+            }, "Could not change the job")
+          }
+        />
+        <Button styles={styles} kind="ghost" label="Edit" disabled={working} onPress={onEdit} />
+        {confirmDelete ? (
+          <>
+            <Button
+              styles={styles}
+              kind="danger"
+              label="Confirm delete"
+              disabled={working}
+              onPress={() =>
+                void act(async function destroy() {
+                  await remove({ id: job.id });
+                  onDeleted();
+                }, "Could not delete the job")
+              }
+            />
+            <Button styles={styles} kind="ghost" label="Keep" onPress={() => setConfirmDelete(false)} />
+          </>
+        ) : (
+          <Button styles={styles} kind="danger" label="Delete" disabled={working} onPress={() => setConfirmDelete(true)} />
+        )}
+        {working ? <ActivityIndicator size="small" color={foreground} /> : null}
+      </View>
+
+      <Section styles={styles} title="Schedule">
+        <Text style={styles.textBody}>{job.schedule.description}</Text>
+        {job.schedule.type === "cron" ? (
+          <Text style={[styles.textBody, styles.textMuted]}>{job.schedule.expression}</Text>
+        ) : null}
+        <Text style={[styles.textBody, styles.textMuted]}>
+          {job.enabled
+            ? job.nextRun === null
+              ? "Next run: not scheduled"
+              : `Next run: ${absoluteTime(job.nextRun)}`
+            : "Next run: none while the job is disabled"}
+          {` · ${job.timezone ?? timezone}`}
+        </Text>
+      </Section>
+
+      <Section styles={styles} title="Command">
+        <Text style={styles.code} selectable>
+          {job.command === "" ? "(none)" : job.command}
+        </Text>
+      </Section>
+
+      <View style={styles.facts}>
+        <View style={styles.fact}>
+          <Text style={styles.label}>Working directory</Text>
+          <Text style={styles.factValue}>{job.cwd ?? "Home directory"}</Text>
+        </View>
+        {job.pid !== null ? (
+          <View style={styles.fact}>
+            <Text style={styles.label}>PID</Text>
+            <Text style={styles.factValue}>{job.pid}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <Section styles={styles} title="Recent runs">
+        {job.recentRuns.length === 0 ? (
+          <Text style={[styles.textBody, styles.textMuted]}>Nothing recorded yet.</Text>
+        ) : (
+          job.recentRuns.map((entry) => <RunLine key={entry.startedAt + entry.finishedAt} styles={styles} run={entry} />)
+        )}
+      </Section>
+
+      <Section styles={styles} title="Log">
+        <View style={styles.actions}>
+          <Button
+            styles={styles}
+            kind="ghost"
+            label={follow.following ? "Stop following" : "Follow"}
+            onPress={follow.following ? follow.stop : follow.start}
+          />
+          {/* Hidden while following: the box is showing the tail, so a button
+              that repaints it from the file would only look broken. */}
+          {follow.following ? null : (
+            <Button styles={styles} kind="ghost" label={logBusy ? "Loading…" : "Refresh log"} disabled={logBusy} onPress={() => void loadLog()} />
+          )}
+          <Button
+            styles={styles}
+            kind="ghost"
+            label="Clear log"
+            disabled={working || logBusy}
+            onPress={() =>
+              void act(async function clearTheLog() {
+                await clearLog({ id: job.id });
+                // The pane is looking at a file that no longer has anything in
+                // it: stop the tail and repaint from the emptied file.
+                follow.stop();
+                await loadLog();
+                onNotice({ tone: "info", text: `Cleared the log of "${job.name}".` });
+              }, "Could not clear the log")
+            }
+          />
+          {follow.following ? (
+            <Text style={[styles.textBody, styles.textMuted]}>
+              {follow.lines === null ? "Starting the tail…" : "Following live."}
+            </Text>
+          ) : log?.truncated ? (
+            <Text style={[styles.textBody, styles.textMuted]}>Showing the last 64 KB.</Text>
+          ) : null}
+        </View>
+        <ScrollView style={styles.logBox} nestedScrollEnabled>
+          <Text style={styles.logText} selectable>
+            {follow.following
+              ? follow.lines === null
+                ? ""
+                : follow.lines.join("\n")
+              : log === null
+                ? ""
+                : log.text === ""
+                  ? "No output yet."
+                  : log.text}
+          </Text>
+        </ScrollView>
+        <Text style={[styles.rowLine, styles.textMuted]} selectable>
+          {job.logPath}
+        </Text>
+      </Section>
+    </ScrollView>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The form
+
+type IntervalUnit = "seconds" | "minutes" | "hours";
+
+const UNIT_SECONDS: Record<IntervalUnit, number> = { seconds: 1, minutes: 60, hours: 3600 };
+
+interface Draft {
+  name: string;
+  command: string;
+  cwd: string;
+  timezone: string;
+  mode: "cron" | "interval";
+  expression: string;
+  every: string;
+  unit: IntervalUnit;
+}
+
+function draftFrom(job: Job | null): Draft {
+  const base: Draft = {
+    name: "",
+    command: "",
+    cwd: "",
+    timezone: "",
+    mode: "cron",
+    expression: "0 9 * * 1-5",
+    every: "30",
+    unit: "minutes",
+  };
+  if (job === null) return base;
+  const draft: Draft = {
+    ...base,
+    name: job.name,
+    command: job.command,
+    cwd: job.cwd ?? "",
+    timezone: job.timezone ?? "",
+  };
+  if (job.schedule.type === "cron") draft.expression = job.schedule.expression;
+  if (job.schedule.type === "interval") {
+    draft.mode = "interval";
+    const { seconds } = job.schedule;
+    const unit: IntervalUnit = seconds % 3600 === 0 ? "hours" : seconds % 60 === 0 ? "minutes" : "seconds";
+    draft.unit = unit;
+    draft.every = String(seconds / UNIT_SECONDS[unit]);
+  }
+  return draft;
+}
+
+/** The spec the draft describes, or the first thing wrong with it. */
+function specFrom(draft: Draft): { ok: true; spec: JobSpec } | { ok: false; error: string } {
+  const name = draft.name.trim();
+  if (name === "") return { ok: false, error: "Give the job a name" };
+  const command = draft.command.trim();
+  if (command === "") return { ok: false, error: "Give the job a command" };
+  const cwd = draft.cwd.trim();
+  let schedule: JobSpec["schedule"];
+  if (draft.mode === "cron") {
+    const parsed = parseCron(draft.expression);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    schedule = { type: "cron", expression: draft.expression.trim() };
+  } else {
+    const every = Number(draft.every);
+    if (!Number.isFinite(every) || every <= 0) return { ok: false, error: "The interval must be a positive number" };
+    const seconds = Math.round(every * UNIT_SECONDS[draft.unit]);
+    if (seconds < 1) return { ok: false, error: "The interval must be at least a second" };
+    schedule = { type: "interval", seconds };
+  }
+  const timezone = draft.timezone.trim();
+  return { ok: true, spec: { name, command, cwd: cwd === "" ? null : cwd, schedule, timezone: timezone === "" ? null : timezone } };
+}
+
+function JobForm({
+  styles,
+  job,
+  compact,
+  foreground,
+  muted,
+  onCancel,
+  onSaved,
+}: {
+  styles: Styles;
+  job: Job | null;
+  compact: boolean;
+  foreground: string;
+  muted: string;
+  onCancel: () => void;
+  onSaved: (job: Job) => void;
+}) {
+  const create = useRpc(createJob);
+  const update = useRpc(updateJob);
+  const draftKey = job === null ? "new" : `edit-${job.id}`;
+  const [draft, setDraft] = useState<Draft>(() =>
+    cachedDraft?.key === draftKey ? cachedDraft.draft : draftFrom(job),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const patch = useCallback(
+    (change: Partial<Draft>) =>
+      setDraft((current) => {
+        const next = { ...current, ...change };
+        cachedDraft = { key: draftKey, draft: next };
+        return next;
+      }),
+    [draftKey],
+  );
+
+  // Leaving on purpose, by either button, is what forgets the draft; a
+  // navigation away is not.
+  const cancel = useCallback(() => {
+    cachedDraft = null;
+    onCancel();
+  }, [onCancel]);
+
+  // What the daemon will be told, updated as the expression is typed.
+  const preview = useMemo(() => {
+    if (draft.mode === "interval") {
+      const every = Number(draft.every);
+      if (!Number.isFinite(every) || every <= 0) return { ok: false as const, text: "Enter a positive number" };
+      return { ok: true as const, text: describeInterval(Math.round(every * UNIT_SECONDS[draft.unit])) };
+    }
+    const parsed = parseCron(draft.expression);
+    if (!parsed.ok) return { ok: false as const, text: parsed.error };
+    return { ok: true as const, text: describeCron(parsed.fields) };
+  }, [draft.mode, draft.every, draft.unit, draft.expression]);
+
+  const save = useCallback(
+    async function save() {
+      const result = specFrom(draft);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        const saved = job === null ? await create(result.spec) : await update({ id: job.id, spec: result.spec });
+        cachedDraft = null;
+        onSaved(saved);
+      } catch (caught) {
+        setError(errorText(caught));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [draft, job, create, update, onSaved],
+  );
+
+  return (
+    <ScrollView style={styles.pane} contentContainerStyle={styles.paneContent} keyboardShouldPersistTaps="handled">
+      <View style={styles.rowTop}>
+        {compact ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Cancel" onPress={cancel} style={styles.iconButton}>
+            <Icon name="ArrowLeft" size={18} color={foreground} />
+          </Pressable>
+        ) : null}
+        <Text style={[styles.heading, { flex: 1 }]}>{job === null ? "New job" : `Edit ${job.name}`}</Text>
+      </View>
+
+      <View>
+        <Text style={styles.label}>Name</Text>
+        <TextInput
+          accessibilityLabel="Job name"
+          style={styles.input}
+          value={draft.name}
+          onChangeText={(name) => patch({ name })}
+          placeholder="Nightly backup"
+          placeholderTextColor={muted}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
+      <View>
+        <Text style={styles.label}>Command — run by your login shell, so it can be anything you type at a prompt</Text>
+        <TextInput
+          accessibilityLabel="Command"
+          style={[styles.input, styles.inputMono]}
+          value={draft.command}
+          onChangeText={(command) => patch({ command })}
+          placeholder="python scripts/export.py --daily"
+          placeholderTextColor={muted}
+          multiline
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
+      <View>
+        <Text style={styles.label}>Working directory — optional, absolute or ~/…, defaults to your home</Text>
+        <TextInput
+          accessibilityLabel="Working directory"
+          style={styles.input}
+          value={draft.cwd}
+          onChangeText={(cwd) => patch({ cwd })}
+          placeholder="~/repositories/project"
+          placeholderTextColor={muted}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
+      <View>
+        <Text style={styles.label}>Time zone — optional IANA name, e.g. America/New_York; defaults to the daemon's</Text>
+        <TextInput
+          accessibilityLabel="Time zone"
+          style={styles.input}
+          value={draft.timezone}
+          onChangeText={(timezone) => patch({ timezone })}
+          placeholder="daemon time zone"
+          placeholderTextColor={muted}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
+      <View style={{ gap: 8 }}>
+        <Text style={styles.label}>Schedule</Text>
+        <View style={styles.actions}>
+          <Chip styles={styles} label="Cron expression" on={draft.mode === "cron"} onPress={() => patch({ mode: "cron" })} />
+          <Chip styles={styles} label="Fixed interval" on={draft.mode === "interval"} onPress={() => patch({ mode: "interval" })} />
+        </View>
+        {draft.mode === "cron" ? (
+          <TextInput
+            accessibilityLabel="Cron expression"
+            style={[styles.input, { fontFamily: styles.code.fontFamily }]}
+            value={draft.expression}
+            onChangeText={(expression) => patch({ expression })}
+            placeholder="minute hour day month weekday"
+            placeholderTextColor={muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        ) : (
+          <View style={styles.actions}>
+            <Text style={styles.textBody}>Every</Text>
+            <TextInput
+              accessibilityLabel="Interval"
+              style={[styles.input, { width: 80 }]}
+              value={draft.every}
+              onChangeText={(every) => patch({ every })}
+              keyboardType="numeric"
+            />
+            {(["seconds", "minutes", "hours"] as const).map((unit) => (
+              <Chip key={unit} styles={styles} label={unit} on={draft.unit === unit} onPress={() => patch({ unit })} />
+            ))}
+          </View>
+        )}
+        <Text style={[styles.textBody, preview.ok ? styles.textMuted : styles.textDanger]}>{preview.text}</Text>
+      </View>
+
+      {error !== null ? <Text style={[styles.textBody, styles.textDanger]}>{error}</Text> : null}
+
+      <View style={styles.actions}>
+        <Button styles={styles} label={saving ? "Saving…" : job === null ? "Create job" : "Save changes"} disabled={saving} onPress={() => void save()} />
+        <Button styles={styles} kind="ghost" label="Cancel" disabled={saving} onPress={cancel} />
+      </View>
+    </ScrollView>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The surface
+
+export function CronJobs(props: PluginScreenProps) {
+  const styles = useStyles(props);
+  const { compact } = props.layout;
+  const foreground = props.theme.colors.foreground;
+  const muted = props.theme.colors.foregroundMuted;
+  const list = useRpc(listJobs);
+  const acknowledge = useRpc(acknowledgeJob);
+
+  const [jobs, setJobs] = useState<Job[] | null>(cachedJobs);
+  const [dataDir, setDataDir] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(cachedJobs === null);
+  const requestedJob = requestedJobId(props.params);
+  const [pane, setPaneState] = useState<Pane>(function initialPane() {
+    cachedPane = paneFor(requestedJob, cachedPane);
+    return cachedPane;
+  });
+  const setPane = useCallback((next: Pane) => {
+    cachedPane = next;
+    setPaneState(next);
+  }, []);
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
+
+  /**
+   * A job the URL named that the list in hand does not have — one created
+   * since the list was last read, which the sidebar's popover can name. It
+   * gets one fresh read before the pane gives up on it.
+   */
+  const awaitingRef = useRef(isListed(requestedJob) ? null : requestedJob);
+
+  const refresh = useCallback(
+    async function refresh(quiet = false) {
+      if (!quiet) setBusy(true);
+      try {
+        const next = await list({});
+        awaitingRef.current = null;
+        cachedJobs = next.jobs;
+        setJobs(next.jobs);
+        setDataDir(next.dataDir);
+        setTimezone(next.timezone);
+        setError(null);
+      } catch (caught) {
+        setError(errorText(caught));
+      } finally {
+        if (!quiet) setBusy(false);
+      }
+    },
+    [list],
+  );
+
+  // A run in progress is worth watching: it finishes and its history line
+  // lands within seconds, so the list polls faster until nothing is running.
+  const anyRunning = (jobs ?? []).some((job) => job.running);
+  useEffect(() => {
+    void refresh();
+    // While a form is open the list still refreshes underneath, which is
+    // harmless: the form owns its own draft.
+    const timer = setInterval(() => void refresh(true), anyRunning ? RUNNING_REFRESH_MS : REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [refresh, anyRunning]);
+
+  const replaceJob = useCallback((job: Job) => {
+    setJobs((current) => {
+      const rest = (current ?? []).filter((entry) => entry.id !== job.id);
+      const next = [...rest, job].sort((a, b) => a.id.localeCompare(b.id));
+      cachedJobs = next;
+      return next;
+    });
+  }, []);
+
+  const toast = useToast();
+  const showNotice = useCallback(
+    (next: Notice) => {
+      if (next.tone === "danger") toast.error(next.text);
+      else toast.show(next.text, { variant: "success" });
+    },
+    [toast],
+  );
+
+  const selectedId = paneJobId(pane);
+  const selected = selectedId === null ? null : (jobs ?? []).find((job) => job.id === selectedId) ?? null;
+
+  // A job deleted elsewhere, a link to one that is gone, or a broken refresh,
+  // must not strand the pane.
+  useEffect(() => {
+    if (selectedId === null || jobs === null || selected !== null) return;
+    if (awaitingRef.current === selectedId) return;
+    setPane({ kind: "empty" });
+  }, [selectedId, selected, jobs]);
+
+  /**
+   * Opening a failing job is what acknowledges its failure: the sidebar stops
+   * counting it until the job fails again, because what the daemon remembers
+   * is the run, not the job. Keyed on the run rather than on the job, so a
+   * failure that lands while the detail is already open is acknowledged too —
+   * the user is looking straight at it.
+   */
+  const lastRunStartedAt = selected?.recentRuns[0]?.startedAt ?? null;
+  const lastRunExitCode = selected?.recentRuns[0]?.exitCode ?? null;
+  useEffect(() => {
+    if (pane.kind !== "view" || selectedId === null) return;
+    if (lastRunStartedAt === null || lastRunExitCode === null || lastRunExitCode === 0) return;
+    void (async function acknowledgeFailure() {
+      try {
+        await acknowledge({ id: selectedId });
+        refreshFailureAlert();
+      } catch (caught) {
+        // Nothing the user asked for failed; the count simply stands until the
+        // sidebar's own poll, or the next time the job is opened.
+        console.warn(`[paseo-cron] could not acknowledge ${selectedId}: ${errorText(caught)}`);
+      }
+    })();
+  }, [acknowledge, pane.kind, selectedId, lastRunStartedAt, lastRunExitCode]);
+
+  const showList = !compact || pane.kind === "empty";
+  const showPane = !compact || pane.kind !== "empty";
+
+  let paneView: React.ReactNode = null;
+  if (pane.kind === "new") {
+    paneView = (
+      <JobForm
+        key="new"
+        styles={styles}
+        job={null}
+        compact={compact}
+        foreground={foreground}
+        muted={muted}
+        onCancel={() => setPane({ kind: "empty" })}
+        onSaved={(job) => {
+          replaceJob(job);
+          setPane({ kind: "view", id: job.id });
+          showNotice({ tone: "info", text: `Created "${job.name}".` });
+        }}
+      />
+    );
+  } else if (pane.kind === "edit" && selected !== null) {
+    paneView = (
+      <JobForm
+        key={`edit-${selected.id}`}
+        styles={styles}
+        job={selected}
+        compact={compact}
+        foreground={foreground}
+        muted={muted}
+        onCancel={() => setPane({ kind: "view", id: selected.id })}
+        onSaved={(job) => {
+          replaceJob(job);
+          setPane({ kind: "view", id: job.id });
+          showNotice({ tone: "info", text: `Saved "${job.name}".` });
+        }}
+      />
+    );
+  } else if (pane.kind === "view" && selected !== null) {
+    paneView = (
+      <JobDetail
+        key={selected.id}
+        styles={styles}
+        job={selected}
+        compact={compact}
+        timezone={timezone}
+        foreground={foreground}
+        onBack={() => setPane({ kind: "empty" })}
+        onEdit={() => setPane({ kind: "edit", id: selected.id })}
+        onChanged={replaceJob}
+        onDeleted={() => {
+          setJobs((current) => {
+            const next = (current ?? []).filter((entry) => entry.id !== selected.id);
+            cachedJobs = next;
+            return next;
+          });
+          setPane({ kind: "empty" });
+          // Its failure went with it; the sidebar should not keep counting it.
+          refreshFailureAlert();
+          showNotice({ tone: "info", text: `Deleted "${selected.name}".` });
+        }}
+        onNotice={showNotice}
+      />
+    );
+  } else if (!compact) {
+    paneView = (
+      <View style={styles.empty}>
+        <Text style={styles.emptyText}>Select a job, or create one.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.header}>
+        <Text style={styles.title}>{JOBS_TITLE}</Text>
+        <View style={styles.spacer} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={busy ? "Loading" : "Refresh"}
+          disabled={busy}
+          onPress={() => void refresh()}
+          style={styles.iconButton}
+        >
+          {busy ? <ActivityIndicator size="small" color={muted} /> : <Icon name="RefreshCw" size={15} color={foreground} />}
+        </Pressable>
+        <Button styles={styles} label="New job" onPress={() => setPane({ kind: "new" })} />
+      </View>
+
+      {error !== null ? (
+        <View style={[styles.notice, styles.noticeDanger]}>
+          <Text style={styles.noticeText}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.body}>
+        {showList ? (
+          <ScrollView style={styles.list}>
+            {jobs === null ? null : jobs.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  No jobs yet. A job is a shell command and a schedule; the daemon runs it and keeps its last twenty
+                  runs. Jobs fire only while the Paseo daemon is running
+                  {dataDir === null ? "" : `. Everything lives in ${dataDir}.`}
+                </Text>
+              </View>
+            ) : (
+              jobs.map((job) => (
+                <JobRow
+                  key={job.id}
+                  styles={styles}
+                  job={job}
+                  selected={job.id === selectedId}
+                  onPress={() => setPane({ kind: "view", id: job.id })}
+                />
+              ))
+            )}
+          </ScrollView>
+        ) : null}
+        {showPane ? paneView : null}
+      </View>
+    </View>
+  );
+}
