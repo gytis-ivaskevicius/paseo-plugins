@@ -23,7 +23,7 @@ Agent usage: see [skills/paseo-secrets/SKILL.md](skills/paseo-secrets/SKILL.md).
 ## Install
 
 ```bash
-paseo plugin install ~/Projects/paseo-secrets
+paseo plugin install ~/Projects/paseo-plugins/plugins/secrets
 ```
 
 Then open **Secrets** in the sidebar.

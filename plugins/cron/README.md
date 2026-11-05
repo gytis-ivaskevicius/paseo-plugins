@@ -19,7 +19,7 @@ history and the failure badge are its work.
 ## Install
 
 ```
-paseo plugin install git:gytis-ivaskevicius/paseo-cron
+paseo plugin add git:gytis-ivaskevicius/paseo-plugins:plugins/cron
 ```
 
 Installing from Git runs the manifest's `build` step, which installs the one
@@ -28,7 +28,7 @@ point at the directory instead — a directory install runs no build step, so ru
 `npm ci --omit=dev` there first:
 
 ```
-paseo plugin install /absolute/path/to/paseo-cron
+paseo plugin install /absolute/path/to/paseo-plugins/plugins/cron
 paseo plugin reload paseo-cron      # after editing the source
 ```
 

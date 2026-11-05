@@ -5,9 +5,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gytis-ivaskevicius/paseo-cron.git"
+    "url": "git+https://github.com/gytis-ivaskevicius/paseo-plugins.git",
+    "directory": "plugins/cron"
   },
-  "homepage": "https://github.com/gytis-ivaskevicius/paseo-cron#readme",
+  "homepage": "https://github.com/gytis-ivaskevicius/paseo-plugins/tree/main/plugins/cron#readme",
   "keywords": [
     "paseo",
     "paseo-plugin",
