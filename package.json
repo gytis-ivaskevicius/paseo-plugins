@@ -1,0 +1,13 @@
+{
+  "name": "paseo-plugins",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Paseo plugins maintained by Gytis Ivaškevičius",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gytis-ivaskevicius/paseo-plugins.git"
+  },
+  "scripts": {
+    "check": "./scripts/check.sh"
+  }
+}

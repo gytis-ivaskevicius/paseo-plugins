@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -13,6 +13,5 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+          cache-dependency-path: plugins/*/package-lock.json
+      - run: ./scripts/check.sh
