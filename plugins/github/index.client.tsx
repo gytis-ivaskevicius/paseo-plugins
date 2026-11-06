@@ -21,7 +21,7 @@ export default function contribute(client: PluginClientContext) {
   client.addSettingsScreen({
     id: "github",
     title: "GitHub",
-    icon: "Github",
+    icon: "GitPullRequest",
     Component: GitHubSettings,
   });
   client.addScreen({ id: "github", title: "GitHub", Component: Screen });

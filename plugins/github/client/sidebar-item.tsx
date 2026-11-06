@@ -17,7 +17,7 @@ export function GitHubSidebarItem({
 
   return (
     <SidebarRow
-      icon="Github"
+      icon="GitPullRequest"
       label="GitHub"
       active={currentScreen?.screenId === "github"}
       onPress={function () {
