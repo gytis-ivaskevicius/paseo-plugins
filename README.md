@@ -28,6 +28,10 @@ dependencies declare no build step.
 Install dependencies inside the plugin folder you are working on; there are no
 workspaces, so every plugin keeps its own lockfile and `node_modules`.
 
+The `@getpaseo/*` dev dependencies track the daemon's version. Bump all three
+together, regenerate the lockfile, and typecheck: the plugin API gains components
+between minor versions, and a stale pin silently hides them.
+
 ```bash
 cd plugins/cron
 npm install

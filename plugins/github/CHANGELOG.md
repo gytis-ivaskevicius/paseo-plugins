@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Item descriptions render as Markdown through Paseo's `Markdown` component.
+- Requires `@getpaseo/plugin` 0.15.0 or newer.
+
 ## 0.1.0
 
 - Initial release: authored pull requests, human incoming items, a collapsed bot

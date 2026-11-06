@@ -2,6 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { openExternalUrl, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal } from "@getpaseo/plugin/client/react-native";
+import { Markdown } from "@getpaseo/plugin/client/ui";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
@@ -486,9 +487,13 @@ function DetailPane({
         ) : null}
 
         <Section title="Description" theme={theme}>
-          <Text style={{ color: theme.colors.foreground, fontSize: 13, lineHeight: 20 }}>
-            {item.body || "No description."}
-          </Text>
+          {item.body ? (
+            <Markdown>{item.body}</Markdown>
+          ) : (
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>
+              No description.
+            </Text>
+          )}
         </Section>
 
         {item.kind === "pull_request" ? (

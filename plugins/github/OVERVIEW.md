@@ -36,6 +36,13 @@ is a function of the node and the configured owners: authored, review-requested,
 owner membership, and bot
 authorship all come from the item itself, not from which search returned it.
 
+## Description rendering
+
+Item bodies are passed to Paseo's `Markdown` component from
+`@getpaseo/plugin/client/ui`, which applies the host's theme, link handling,
+code blocks, and tables. The plugin keeps no HTML or Markdown parser of its own;
+that component arrived in the 0.15 line, so the plugin pins 0.15.0.
+
 A search that fails does not discard the searches that succeeded. The previous
 feed stays visible behind the error banner until a refresh completes cleanly.
 
