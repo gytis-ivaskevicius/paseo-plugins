@@ -83,7 +83,7 @@ export function GitHubSettings() {
       <SettingsInput
         key={version}
         label="Owners"
-        hint="Comma-separated, for example: your-login, vi-tality, DevPalace"
+        hint="Comma-separated, for example: your-login, your-org"
         initialValue={text}
         onChangeText={setText}
         disabled={loading || saving}

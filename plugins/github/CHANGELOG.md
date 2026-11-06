@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Default owners now come from the signed-in GitHub user and the organizations
+  they belong to, instead of a fixed list.
 - Item descriptions render as Markdown through Paseo's `Markdown` component.
 - Requires `@getpaseo/plugin` 0.15.0 or newer.
 

@@ -85,6 +85,17 @@ export async function viewerLogin(): Promise<string> {
   return login;
 }
 
+export async function viewerOrgs(): Promise<string[]> {
+  const result = await runGh(["api", "user/orgs", "--paginate", "--jq", ".[].login"]);
+  if (result.code !== 0) throw ghFailure(result.stderr, result.code);
+  return result.stdout
+    .split("\n")
+    .map(function (line) {
+      return line.trim();
+    })
+    .filter(Boolean);
+}
+
 export async function graphql(
   query: string,
   variables: Record<string, unknown>,

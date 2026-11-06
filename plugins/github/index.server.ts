@@ -13,6 +13,7 @@ import {
   collaborators,
   requestReview,
   viewerLogin,
+  viewerOrgs,
 } from "./server/gh";
 
 export default function contribute(server: PluginServerContext) {
@@ -21,7 +22,7 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(githubConfigRead, async function () {
-    return readConfig(await viewerLogin());
+    return readConfig(await viewerLogin(), { defaultOwners: viewerOrgs });
   });
 
   server.handle(githubConfigWrite, async function (input) {

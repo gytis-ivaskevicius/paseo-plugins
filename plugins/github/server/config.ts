@@ -3,8 +3,8 @@ import { dirname } from "node:path";
 import { ConfigSchema, sameLogin, type Config } from "../shared/github";
 import { dataPath } from "./data-dir";
 
-export const DEFAULT_OWNERS = ["vi-tality", "DevPalace"];
 const OWNER_PATTERN = /^[A-Za-z0-9-]+$/;
+const MAX_DEFAULT_ORGS = 10;
 
 export function normalizeOwners(input: readonly string[], viewer: string): string[] {
   const owners: string[] = [];
@@ -34,20 +34,39 @@ export function normalizeOwners(input: readonly string[], viewer: string): strin
   return owners;
 }
 
-export function defaultConfig(viewer: string): Config {
-  return { owners: normalizeOwners([viewer, ...DEFAULT_OWNERS], viewer) };
+export function defaultConfig(viewer: string, orgs: readonly string[]): Config {
+  // Each owner costs two searches per refresh and GitHub allows 30 search
+  // requests per minute, so keep auto-detected defaults within that budget.
+  return { owners: normalizeOwners([viewer, ...orgs.slice(0, MAX_DEFAULT_ORGS)], viewer) };
 }
 
 export function configPath(): string {
   return dataPath("config.json");
 }
 
-export async function readConfig(viewer: string, path = configPath()): Promise<Config> {
+export interface ReadConfigOptions {
+  path?: string;
+  defaultOwners: () => Promise<readonly string[]>;
+}
+
+export async function readConfig(
+  viewer: string,
+  options: ReadConfigOptions,
+): Promise<Config> {
+  const path = options.path ?? configPath();
   let text: string;
   try {
     text = await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return defaultConfig(viewer);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      let orgs: readonly string[] = [];
+      try {
+        orgs = await options.defaultOwners();
+      } catch {
+        // Organization membership is optional; fall back to the viewer alone.
+      }
+      return defaultConfig(viewer, orgs);
+    }
     throw error;
   }
 

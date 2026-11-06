@@ -2,7 +2,7 @@ import { sameLogin } from "../shared/github";
 import type { Feed } from "../shared/github";
 import { classify } from "./classify";
 import { readConfig } from "./config";
-import { ownerType, viewerLogin } from "./gh";
+import { ownerType, viewerLogin, viewerOrgs } from "./gh";
 import { buildSearches, searchNodes, type SearchNode } from "./queries";
 
 interface FeedCache {
@@ -34,7 +34,7 @@ async function typeOf(owner: string): Promise<"Organization" | "User"> {
 
 async function fetchFeed(): Promise<Feed> {
   const viewer = await viewerLogin();
-  const config = await readConfig(viewer);
+  const config = await readConfig(viewer, { defaultOwners: viewerOrgs });
 
   const types: Record<string, "Organization" | "User"> = {};
   await Promise.all(

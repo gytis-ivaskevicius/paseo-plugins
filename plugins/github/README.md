@@ -29,8 +29,8 @@ in with `gh auth login`. Private organization repositories need the `repo` and
 
 ## Configuration
 
-The default owner list is your own login plus `vi-tality` and `DevPalace`. Edit
-it in **Settings → GitHub** as a comma-separated list. Your own login must stay
+The default owner list is your own login plus the organizations you belong to.
+Edit it in **Settings → GitHub** as a comma-separated list. Your own login must stay
 in the list. The next refresh uses the new owners without a restart.
 
 Owners live in `$PASEO_HOME/plugin-data/paseo-github/config.json`. Writes are
