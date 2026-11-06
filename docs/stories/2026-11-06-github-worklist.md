@@ -68,6 +68,10 @@ Paseo has no view of the GitHub work that is actually outstanding for this accou
   - → each row shows its age
   - → the age text uses the danger color when the last update is older than 90 days
 
+- the window is wide enough
+  - → the list and the selected item's detail are visible at the same time
+  - → selecting another row replaces the detail without leaving the list
+
 - a row is selected
   - → a detail pane shows title, body, author, comment count, the pending review requests ("waiting on"), every reviewer with their latest state, the aggregate decision on authored PRs, and, for PRs, the check summary
   - → on a narrow window the detail opens as a sheet over the list instead
@@ -206,8 +210,6 @@ Config file: `$PASEO_HOME/plugin-data/paseo-github/config.json`, `{ "owners": ["
 
 **Why the owner list and not `user:@me`.** GitHub's `user:` qualifier matches repositories owned by the user, not org repositories, and combining `user:@me` with `org:` is an AND that matches nothing. One search per owner is the only correct shape. The feed therefore costs 2 × `owners` + 5 searches per refresh: authored PRs, authored issues, review requests, assigned PRs, assigned issues, plus one PR and one issue search per owner. The default owner list is the viewer plus `vi-tality` and `DevPalace`. `NixOS`, `EpicGames`, `ngi-nix`, and `dev-bud` are excluded by default and can be added in settings.
 
-**Chosen defaults, not derived facts.** A 60-second refresh cadence, the 90-day age threshold, and the sidebar count (`yourPrs + human incoming`) are product choices. Each is cheap to change; none should be hard-coded in more than one place. The age threshold is a color only — nothing is hidden or collapsed by age.
-
 **Search constraints.** Authenticated search allows 30 requests per minute; a refresh at 60-second intervals uses about a third of that. Search returns at most 1,000 results per query, and the plugin requests `first: 50` per query, which exceeds every current bucket. Aliasing all searches into a single GraphQL request serializes them server-side; issuing them in parallel from the daemon is acceptable and is what Attention Span does. A partially failed search must not discard the searches that succeeded.
 
 **Two review signals.** `reviewDecision` is GitHub's PR-wide aggregate over everyone's reviews; it answers "can this merge" and is what authored PRs show. `reviews` is the latest review per reviewer, taken from the same `latestReviews` connection in the same request; the viewer's own row in it answers "did I already approve this or ask for changes" and is what incoming PRs show. Keep both: `reviewDecision` accounts for stale approvals and branch-protection requirements, which the per-reviewer array cannot reconstruct, so the aggregate must not be derived from `reviews`.
@@ -230,9 +232,7 @@ Config file: `$PASEO_HOME/plugin-data/paseo-github/config.json`, `{ "owners": ["
 
 **Session labels.** An agent started from the plugin carries `paseo-github=1` and `paseo-github-item=<key>`. The second label is the lookup used to reopen an existing session instead of creating a duplicate. These names are a contract with the client; do not rename them after the first release without migrating existing agents.
 
-**Reuse.** `runGh`/`graphql` from Attention Span (`https://github.com/andrioid/paseo-attention-span`, MIT) is the reference for spawning `gh` and unwrapping GraphQL errors; its `client/markdown.tsx` is the reference for rendering an item body; the session-launch flow in its `client/sessions.ts` is the reference for resolving a repo to a registered Paseo project and starting a labelled agent. Copy the small pieces with attribution in `OVERVIEW.md`; do not fork the classifier, the coverage model, or the tabbed screen.
-
-**Client constraints inherited from this repo.** Async function expressions, never async arrows (Hermes evaluates async arrows to `undefined`). List rendering through `.map`, never a `for…of` body. React Native primitives only; colors from `theme.colors`. The client must not import `server/`. Screen state cached at module scope because Paseo unmounts the screen on navigation.
+**Reuse.** `runGh`/`graphql` from Attention Span (`https://github.com/andrioid/paseo-attention-span`, MIT) is the reference for spawning `gh` and unwrapping GraphQL errors; the session-launch flow in its `client/sessions.ts` is the reference for resolving a repo to a registered Paseo project and starting a labelled agent. Copy the small pieces with attribution in `OVERVIEW.md`; do not fork the classifier, the coverage model, or the tabbed screen.
 
 **Starting points.** New plugin at `plugins/github/`, plugin id `paseo-github`, sidebar label `GitHub`, following `plugins/cron/` for the manifest, lockfile, `index.server.ts` / `index.client.tsx` split, `shared/` contracts, and `server/host-imports.test.ts`. Add the plugin to `docs/product.md` only after it ships, and correct the entry there if the shipped behavior differs. The installed Attention Span source is at `~/.paseo/plugins/attention-span/*/node_modules/@andrioid/paseo-attention-span` for reference; the version changes on update, so cite the repository in code comments, not that path.
 
