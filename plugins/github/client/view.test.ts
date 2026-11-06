@@ -64,6 +64,32 @@ describe("chips", function () {
     );
   });
 
+  it("derives the aggregate decision from reviews when GitHub reports none", function () {
+    const approved = pullRequest({
+      reviews: [
+        {
+          login: "someone",
+          avatarUrl: null,
+          state: "APPROVED",
+          submittedAt: "2026-03-30T00:00:00Z",
+        },
+      ],
+    });
+    expect(aggregateChip(approved)?.text).toBe("Approved");
+
+    const changes = pullRequest({
+      reviews: [
+        {
+          login: "someone",
+          avatarUrl: null,
+          state: "CHANGES_REQUESTED",
+          submittedAt: "2026-03-30T00:00:00Z",
+        },
+      ],
+    });
+    expect(aggregateChip(changes)?.text).toBe("Changes requested");
+  });
+
   it("shows the viewer's own review on an incoming pull request", function () {
     const item = pullRequest({
       author: { login: "someone", avatarUrl: null, isBot: false },

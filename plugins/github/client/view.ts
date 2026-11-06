@@ -70,6 +70,24 @@ export function aggregateChip(item: PullRequestItem): Chip | null {
   if (item.reviewDecision === "REVIEW_REQUIRED") {
     return { text: "Review required", tone: "warn" };
   }
+
+  const others = item.reviews.filter(function (review) {
+    return !sameLogin(review.login, item.author.login);
+  });
+  if (
+    others.some(function (review) {
+      return review.state === "CHANGES_REQUESTED";
+    })
+  ) {
+    return { text: "Changes requested", tone: "danger" };
+  }
+  if (
+    others.some(function (review) {
+      return review.state === "APPROVED";
+    })
+  ) {
+    return { text: "Approved", tone: "good" };
+  }
   return null;
 }
 

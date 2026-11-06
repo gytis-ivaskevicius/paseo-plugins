@@ -28,14 +28,14 @@ export async function projectsByRepo(paseo: Paseo): Promise<ProjectMatch[]> {
 
 export async function existingSession(paseo: Paseo, itemKey: string): Promise<string | null> {
   const { entries } = await paseo.agents.list({
-    filter: { labels: { [ITEM_LABEL]: itemKey } },
+    filter: { labels: { [SESSION_LABEL]: "1" } },
   });
   const agent = entries
     .map(function (entry) {
       return entry.agent;
     })
     .find(function (candidate) {
-      return !candidate.archivedAt;
+      return !candidate.archivedAt && candidate.labels?.[ITEM_LABEL] === itemKey;
     });
   return agent?.id ?? null;
 }
