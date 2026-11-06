@@ -1,0 +1,51 @@
+{
+  "name": "paseo-github",
+  "version": "0.1.0",
+  "description": "Paseo plugin: one worklist of authored pull requests and the GitHub items waiting on you",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gytis-ivaskevicius/paseo-plugins.git",
+    "directory": "plugins/github"
+  },
+  "homepage": "https://github.com/gytis-ivaskevicius/paseo-plugins/tree/main/plugins/github#readme",
+  "keywords": [
+    "paseo",
+    "paseo-plugin",
+    "github",
+    "pull-requests",
+    "worklist"
+  ],
+  "type": "module",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/",
+    "CHANGELOG.md",
+    "!**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.11.0",
+    "@getpaseo/plugin": "0.11.0",
+    "@getpaseo/protocol": "0.11.0",
+    "@types/node": "^26.5.0",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0",
+    "zod": "^4.4.3"
+  }
+}

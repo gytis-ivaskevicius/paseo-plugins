@@ -6,6 +6,7 @@ One repository, one CI run, one place to scaffold from.
 | Plugin | What it adds | Runtime deps |
 | --- | --- | --- |
 | [`plugins/cron`](plugins/cron) | A **Cron jobs** screen and sidebar row; the daemon holds the timers | `croner` |
+| [`plugins/github`](plugins/github) | A **GitHub** worklist of authored pull requests and incoming items | none |
 | [`plugins/secrets`](plugins/secrets) | Browse and edit a `pass` store from a Paseo screen | none |
 
 ## Install
@@ -14,6 +15,7 @@ Each plugin installs from its own folder. The path after the colon is required:
 
 ```bash
 paseo plugin add git:gytis-ivaskevicius/paseo-plugins:plugins/cron
+paseo plugin add git:gytis-ivaskevicius/paseo-plugins:plugins/github
 paseo plugin add git:gytis-ivaskevicius/paseo-plugins:plugins/secrets
 ```
 
@@ -45,6 +47,7 @@ code inside the app.
 
 ```
 plugins/cron/      package.json, package-lock.json, paseo-plugin.json, OVERVIEW.md
+plugins/github/    same, no runtime dependencies
 plugins/secrets/   same, no runtime dependencies
 scripts/check.sh   install + typecheck + test every plugin
 .github/workflows  one CI job running scripts/check.sh
